@@ -378,6 +378,7 @@ function renderHeader() {
         )
       ),
       h('button', { className: 'upload-btn', style: { background: 'var(--emerald)' }, onClick: processAllQueued }, '▶ Process All'),
+      h('a', { className: 'upload-btn', href: '/api/v1/documents/export/all-csv', style: { background: 'var(--amber)', textDecoration: 'none', color: 'white' } }, '⬇ Export All CSV'),
       h('button', { className: 'upload-btn', onClick: () => { state.showUpload = true; render(); } }, '+ Upload')
     )
   );
@@ -429,6 +430,8 @@ function renderDocTable(docs, showLink) {
           h('th', null, 'Pages'),
           h('th', null, 'Status'),
           h('th', null, 'Confidence'),
+          h('th', null, 'Txns'),
+          h('th', null, ''),
           h('th', { style: { textAlign: 'right' } }, 'Txns')
         )
       ),
@@ -455,10 +458,19 @@ function renderDocTable(docs, showLink) {
             h('td', { className: 'mono', style: { color: 'var(--text-muted)', fontSize: '13px' } }, doc.page_count != null ? String(doc.page_count) : '--'),
             h('td', null, badge(doc.status)),
             h('td', null, confMeter(doc.confidence_document)),
-            h('td', { className: 'mono', style: { textAlign: 'right', color: 'var(--text-secondary)', fontSize: '13px' } }, doc.transaction_count != null ? String(doc.transaction_count) : '--')
+            h('td', { className: 'mono', style: { textAlign: 'right', color: 'var(--text-secondary)', fontSize: '13px' } }, doc.transaction_count != null ? String(doc.transaction_count) : '--'),
+            h('td', null,
+              (doc.status === 'COMPLETED' || doc.status === 'NEEDS_REVIEW') && doc.transaction_count > 0
+                ? h('a', {
+                    href: `/api/v1/documents/${doc.doc_id}/export/csv`,
+                    style: { color: 'var(--emerald)', textDecoration: 'none', fontSize: '12px', fontWeight: '600', padding: '4px 10px', border: '1px solid var(--emerald-border)', borderRadius: '6px', background: 'var(--emerald-dim)' },
+                    onclick: (e) => e.stopPropagation(),
+                  }, '⬇ CSV')
+                : null
+            )
           )
         ),
-        docs.length === 0 ? h('tr', null, h('td', { colspan: '7', style: { textAlign: 'center', padding: '48px', color: 'var(--text-muted)' } }, 'No documents found')) : null
+        docs.length === 0 ? h('tr', null, h('td', { colspan: '9', style: { textAlign: 'center', padding: '48px', color: 'var(--text-muted)' } }, 'No documents found')) : null
       )
     )
   );
@@ -494,8 +506,14 @@ function renderDetail() {
       metricCard('Transactions', d.transaction_count != null ? String(d.transaction_count) : '0', null, 'cyan')
     ),
     h('div', { className: 'panel' },
-      h('div', { className: 'panel-header' },
-        h('div', { className: 'panel-title' }, 'Extracted Transactions')
+      h('div', { className: 'panel-header', style: { display: 'flex', justifyContent: 'space-between', alignItems: 'center' } },
+        h('div', { className: 'panel-title' }, 'Extracted Transactions'),
+        (d.status === 'COMPLETED' || d.status === 'NEEDS_REVIEW') && d.transaction_count > 0
+          ? h('a', {
+              href: `/api/v1/documents/${d.doc_id}/export/csv`,
+              style: { color: 'var(--emerald)', textDecoration: 'none', fontSize: '13px', fontWeight: '600', padding: '6px 14px', border: '1px solid var(--emerald-border)', borderRadius: '8px', background: 'var(--emerald-dim)', cursor: 'pointer' },
+            }, '⬇ Download CSV')
+          : null
       ),
       state.transactions.length > 0
         ? h('table', { className: 'tx-table' },
