@@ -6,6 +6,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     tesseract-ocr \
     tesseract-ocr-eng \
     libglib2.0-0 \
+    ghostscript \
+    libgl1-mesa-glx \
+    libglib2.0-dev \
     && rm -rf /var/lib/apt/lists/*
 
 # Set working directory

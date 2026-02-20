@@ -101,9 +101,13 @@ async def upload_document(
     session.add(doc)
     await session.flush()
 
-    # TODO: Enqueue processing job to Redis/rq
-    # from app.worker.jobs import enqueue_extraction
-    # enqueue_extraction(new_doc_id, priority)
+    # Enqueue for background processing
+    try:
+        from app.worker.jobs import enqueue_extraction
+        enqueue_extraction(new_doc_id, priority)
+    except Exception as enqueue_err:
+        # Redis unavailable — log but don't fail the upload
+        logger.warning("enqueue_failed", doc_id=new_doc_id, error=str(enqueue_err))
 
     logger.info(
         "document_uploaded",
@@ -166,6 +170,37 @@ async def list_documents(
         limit=limit,
         offset=offset,
     )
+
+
+@router.post("/process-all", status_code=status.HTTP_202_ACCEPTED)
+async def process_all_queued(
+    session: AsyncSession = Depends(get_db),
+):
+    """
+    Process all QUEUED documents inline.
+    Useful for batch processing without worker.
+    """
+    from app.pipeline.orchestrator import DocumentPipeline
+
+    result = await session.execute(
+        select(Document).where(Document.status == "QUEUED").order_by(Document.created_at)
+    )
+    docs = result.scalars().all()
+
+    if not docs:
+        return {"message": "No queued documents", "processed": 0}
+
+    pipeline = DocumentPipeline()
+    results = []
+
+    for doc in docs:
+        try:
+            output = await pipeline.process(str(doc.doc_id))
+            results.append({"doc_id": str(doc.doc_id), "status": output.get("status", "UNKNOWN")})
+        except Exception as e:
+            results.append({"doc_id": str(doc.doc_id), "status": "FAILED", "error": str(e)})
+
+    return {"processed": len(results), "results": results}
 
 
 @router.get("/{doc_id}", response_model=DocumentDetail)
@@ -293,3 +328,35 @@ async def get_document_transactions(
         run_id=str(run_uuid),
         doc_id=doc_id,
     )
+
+
+@router.post("/{doc_id}/process", status_code=status.HTTP_202_ACCEPTED)
+async def process_document_now(
+    doc_id: str,
+    session: AsyncSession = Depends(get_db),
+):
+    """
+    Trigger processing for a single document immediately (inline, no worker needed).
+    Use this when the RQ worker isn't running.
+    """
+    from app.pipeline.orchestrator import DocumentPipeline
+
+    try:
+        doc_uuid = uuid.UUID(doc_id)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid doc_id format")
+
+    # Verify document exists
+    result = await session.execute(select(Document).where(Document.doc_id == doc_uuid))
+    doc = result.scalar_one_or_none()
+    if not doc:
+        raise HTTPException(status_code=404, detail="Document not found")
+
+    # Run pipeline inline
+    pipeline = DocumentPipeline()
+    try:
+        output = await pipeline.process(doc_id)
+        return output
+    except Exception as e:
+        logger.error("inline_processing_failed", doc_id=doc_id, error=str(e))
+        raise HTTPException(status_code=500, detail=f"Processing failed: {str(e)}")

@@ -30,6 +30,8 @@ class ExtractedLine(BaseModel):
     tokens: list[ExtractedToken]
     bbox: BBox
     text: str
+    line_index: int = 0
+    confidence: float = Field(ge=0.0, le=1.0, default=0.95)
 
 
 class ExtractedCell(BaseModel):

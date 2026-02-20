@@ -177,6 +177,8 @@ tbody tr:hover { background: var(--bg-hover); }
 // ═══════════════════════════════════════════════════════════
 // STATE
 // ═══════════════════════════════════════════════════════════
+const POLL_INTERVAL = 10000; // 10 seconds
+
 const state = {
   view: 'overview',        // overview | documents | review
   documents: [],
@@ -226,6 +228,39 @@ async function refreshData() {
   }
 
   render();
+}
+
+async function processAllQueued() {
+  try {
+    const r = await fetch('/api/v1/documents/process-all', { method: 'POST' });
+    if (r.ok) {
+      const data = await r.json();
+      alert('Processing started: ' + data.processed + ' documents');
+      // Poll more frequently during processing
+      const fastPoll = setInterval(async () => { await refreshData(); }, 3000);
+      setTimeout(() => clearInterval(fastPoll), 120000); // Stop after 2 min
+    } else {
+      alert('Failed to start processing: ' + r.status);
+    }
+  } catch (e) {
+    alert('Error: ' + e.message);
+  }
+  await refreshData();
+}
+
+async function processSingle(docId) {
+  try {
+    const r = await fetch('/api/v1/documents/' + docId + '/process', { method: 'POST' });
+    if (r.ok) {
+      const data = await r.json();
+      alert('Processed: ' + data.status + ' — ' + (data.transactions || 0) + ' transactions');
+    } else {
+      alert('Processing failed: ' + r.status);
+    }
+  } catch (e) {
+    alert('Error: ' + e.message);
+  }
+  await refreshData();
 }
 
 async function uploadFile() {
@@ -342,6 +377,7 @@ function renderHeader() {
           )
         )
       ),
+      h('button', { className: 'upload-btn', style: { background: 'var(--emerald)' }, onClick: processAllQueued }, '▶ Process All'),
       h('button', { className: 'upload-btn', onClick: () => { state.showUpload = true; render(); } }, '+ Upload')
     )
   );
