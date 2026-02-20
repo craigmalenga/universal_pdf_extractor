@@ -177,23 +177,36 @@ async def process_all_queued(
     session: AsyncSession = Depends(get_db),
 ):
     """
-    Process all QUEUED documents inline.
-    Useful for batch processing without worker.
+    Process all QUEUED or FAILED documents inline.
+    Marks each as PROCESSING first to prevent duplicate runs.
     """
     from app.pipeline.orchestrator import DocumentPipeline
 
     result = await session.execute(
-        select(Document).where(Document.status == "QUEUED").order_by(Document.created_at)
+        select(Document)
+        .where(Document.status.in_(["QUEUED", "FAILED"]))
+        .order_by(Document.created_at)
     )
     docs = result.scalars().all()
 
     if not docs:
-        return {"message": "No queued documents", "processed": 0}
+        return {"message": "No documents to process", "processed": 0}
+
+    # Mark all as PROCESSING to prevent concurrent runs
+    seen_ids = set()
+    unique_docs = []
+    for doc in docs:
+        doc_id_str = str(doc.doc_id)
+        if doc_id_str not in seen_ids:
+            seen_ids.add(doc_id_str)
+            doc.status = "PROCESSING"
+            unique_docs.append(doc)
+    await session.commit()
 
     pipeline = DocumentPipeline()
     results = []
 
-    for doc in docs:
+    for doc in unique_docs:
         try:
             output = await pipeline.process(str(doc.doc_id))
             results.append({"doc_id": str(doc.doc_id), "status": output.get("status", "UNKNOWN")})

@@ -85,25 +85,25 @@ class DocumentPipeline:
                 from sqlalchemy import text
                 doc_uuid = uuid.UUID(doc_id)
                 doc_str = str(doc_uuid)
-                # Delete in FK order using raw SQL to avoid session issues
+                # Delete in FK order using raw SQL with explicit UUID cast for asyncpg
                 await session.execute(text(
                     "DELETE FROM transaction_evidence WHERE transaction_id IN "
-                    "(SELECT transaction_id FROM transactions WHERE doc_id = :did)"
+                    "(SELECT transaction_id FROM transactions WHERE doc_id = CAST(:did AS uuid))"
                 ), {"did": doc_str})
                 await session.execute(text(
-                    "DELETE FROM transactions WHERE doc_id = :did"
+                    "DELETE FROM transactions WHERE doc_id = CAST(:did AS uuid)"
                 ), {"did": doc_str})
                 await session.execute(text(
-                    "DELETE FROM detected_tables WHERE doc_id = :did"
+                    "DELETE FROM detected_tables WHERE doc_id = CAST(:did AS uuid)"
                 ), {"did": doc_str})
                 await session.execute(text(
-                    "DELETE FROM pages WHERE doc_id = :did"
+                    "DELETE FROM pages WHERE doc_id = CAST(:did AS uuid)"
                 ), {"did": doc_str})
                 await session.execute(text(
-                    "DELETE FROM document_segments WHERE doc_id = :did"
+                    "DELETE FROM document_segments WHERE doc_id = CAST(:did AS uuid)"
                 ), {"did": doc_str})
                 await session.execute(text(
-                    "DELETE FROM extraction_runs WHERE doc_id = :did"
+                    "DELETE FROM extraction_runs WHERE doc_id = CAST(:did AS uuid)"
                 ), {"did": doc_str})
                 await session.commit()
                 logger.info("cleanup_complete", doc_id=doc_id)
@@ -251,6 +251,26 @@ class DocumentPipeline:
                     all_transactions.extend(seg_txns)
                     total_balance_confirmed += seg_balance_confirmed
 
+                # ── Quality gate: remove empty transactions ──
+                valid_transactions = []
+                for tx in all_transactions:
+                    if tx.amount is not None or (tx.description_raw and tx.description_raw.strip()):
+                        valid_transactions.append(tx)
+                    else:
+                        # Remove garbage transaction from session
+                        try:
+                            await session.delete(tx)
+                        except Exception:
+                            try:
+                                session.expunge(tx)
+                            except Exception:
+                                pass
+                if len(valid_transactions) < len(all_transactions):
+                    logger.info("quality_gate_filtered",
+                                original=len(all_transactions),
+                                kept=len(valid_transactions))
+                all_transactions = valid_transactions
+
                 # ── Stage 7: VALIDATE ──
                 await self._update_status(session, doc_id, "VALIDATING")
                 recon_rate = total_balance_confirmed / len(all_transactions) if all_transactions else 0.0
@@ -355,25 +375,28 @@ class DocumentPipeline:
 
     async def _fail_document(self, session: AsyncSession, doc_id: str, run_id: str,
                              error_code: str, error_message: str):
-        """Mark document and run as failed."""
+        """Mark document and run as failed using a FRESH session (main session may be dirty)."""
         try:
-            await session.execute(
-                update(Document).where(Document.doc_id == uuid.UUID(doc_id)).values(status="FAILED")
-            )
-            if run_id:
-                await session.execute(
-                    update(ExtractionRun)
-                    .where(ExtractionRun.run_id == uuid.UUID(run_id))
-                    .values(
-                        status="FAILED",
-                        error_code=error_code,
-                        error_message=error_message[:500],
-                        ended_at=datetime.utcnow(),
-                    )
+            from sqlalchemy import text
+            async with async_session_factory() as fresh_session:
+                await fresh_session.execute(
+                    text("UPDATE documents SET status = 'FAILED' WHERE doc_id = CAST(:did AS uuid)"),
+                    {"did": str(uuid.UUID(doc_id))}
                 )
-            await session.commit()
-        except Exception:
-            logger.error("failed_to_mark_failure", doc_id=doc_id)
+                if run_id:
+                    await fresh_session.execute(
+                        text(
+                            "UPDATE extraction_runs SET status = 'FAILED', "
+                            "error_code = :ecode, error_message = :emsg, "
+                            "ended_at = NOW() "
+                            "WHERE run_id = CAST(:rid AS uuid)"
+                        ),
+                        {"rid": str(uuid.UUID(run_id)), "ecode": error_code, "emsg": error_message[:500]}
+                    )
+                await fresh_session.commit()
+                logger.info("document_marked_failed", doc_id=doc_id)
+        except Exception as e2:
+            logger.error("failed_to_mark_failure", doc_id=doc_id, error=str(e2))
 
     # ─── Segment Analysis ─────────────────────────────────────
 
@@ -740,7 +763,7 @@ class DocumentPipeline:
                                         elif role == "amount" and amount is None:
                                             amount = abs(amt_result.amount)
 
-                            if amount is None and balance is None:
+                            if amount is None:  # Must have an actual amount
                                 continue
 
                             from app.pipeline.table_extractor import is_balance_marker
@@ -919,7 +942,7 @@ class DocumentPipeline:
                                     elif role == "amount" and amount is None:
                                         amount = abs(amt_result.amount)
 
-                        if amount is None and balance is None:
+                        if amount is None:  # Must have an actual amount
                             continue
 
                         from app.pipeline.table_extractor import is_balance_marker
@@ -1078,7 +1101,7 @@ class DocumentPipeline:
                                     elif role == "amount" and amount is None:
                                         amount = abs(amt_result.amount)
 
-                        if amount is None and balance is None:
+                        if amount is None:  # Must have an actual amount
                             continue
 
                         from app.pipeline.table_extractor import is_balance_marker

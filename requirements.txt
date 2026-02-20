@@ -22,6 +22,7 @@ pdf2image>=1.17.0
 pdfplumber>=0.9.0
 camelot-py[base]>=0.11.0
 tabula-py>=2.9.0
+JPype1>=1.5.0
 
 # OCR
 pytesseract>=0.3.10
