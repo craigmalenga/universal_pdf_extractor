@@ -64,7 +64,6 @@ class DocumentPipeline:
     Processes a single document through all 8 stages.
     """
 
-
     def __init__(self):
         self.pdfplumber = PdfPlumberEngine()
         self.tesseract = TesseractEngine()
@@ -193,15 +192,15 @@ class DocumentPipeline:
 
                 # Classify document
                 all_text = "\n".join(e.raw_text for e in extractions if e.raw_text)
-                doc_family, family_conf = classify_document(all_text)
-                doc.doc_family = doc_family
-                doc.doc_family_confidence = Decimal(str(round(family_conf, 4)))
+                classification = classify_document([all_text])
+                doc.doc_family = classification.doc_family
+                doc.doc_family_confidence = Decimal(str(round(classification.confidence, 4)))
 
                 # Detect provider
-                provider, prov_conf = detect_provider(all_text)
-                if provider:
-                    doc.provider_guess = provider
-                    doc.provider_confidence = Decimal(str(round(prov_conf, 4)))
+                provider_result = detect_provider([all_text])
+                if provider_result.provider_name:
+                    doc.provider_guess = provider_result.provider_name
+                    doc.provider_confidence = Decimal(str(round(provider_result.confidence, 4)))
 
                 await session.flush()
 
