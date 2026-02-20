@@ -30,6 +30,8 @@ class TransactionResponse(BaseModel):
     confidence_amount: Optional[float] = None
     confidence_direction: Optional[float] = None
     confidence_date: Optional[float] = None
+    confidence_description: Optional[float] = None
+    confidence_balance: Optional[float] = None
 
     model_config = {"from_attributes": True}
 

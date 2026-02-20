@@ -28,11 +28,17 @@ class DateParseResult(BaseModel):
 
 # Ordered by specificity (try most specific first)
 DATE_FORMATS = [
-    # Unambiguous: named month
+    # Unambiguous: named month with full year
     (r'(\d{1,2})\s+(January|February|March|April|May|June|July|August|September|October|November|December)\s+(\d{4})', 'DD_MONTH_YYYY', False),
     (r'(\d{1,2})\s+(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\w*\s+(\d{4})', 'DD_MON_YYYY', False),
     (r'(\d{1,2})\s+(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\w*\s+(\d{2})', 'DD_MON_YY', False),
     (r'(\d{1,2})(?:st|nd|rd|th)?\s+(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\w*\s+(\d{2,4})', 'DD_ORD_MON_YYYY', False),
+
+    # DDMONYY: 25JUN20 (RBS format, no spaces)
+    (r'(\d{1,2})(JAN|FEB|MAR|APR|MAY|JUN|JUL|AUG|SEP|OCT|NOV|DEC)(\d{2})', 'DDMONYY', False),
+
+    # DDMON: 25JUN (RBS format, no spaces, no year)
+    (r'(\d{1,2})(JAN|FEB|MAR|APR|MAY|JUN|JUL|AUG|SEP|OCT|NOV|DEC)(?!\w)', 'DDMON', True),
 
     # ISO format
     (r'(\d{4})-(\d{2})-(\d{2})', 'YYYY-MM-DD', False),
@@ -44,8 +50,10 @@ DATE_FORMATS = [
     (r'(\d{1,2})/(\d{1,2})/(\d{4})', 'D/M/YYYY', True),
     (r'(\d{2})/(\d{2})/(\d{2})', 'DD/MM/YY', True),
 
-    # No year
+    # DD Mon (no year, with space) - Barclays/Nationwide: "07 May", "01 Apr"
     (r'(\d{1,2})\s+(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\w*', 'DD_MON', True),
+
+    # Numeric no year
     (r'(\d{1,2})/(\d{1,2})', 'DD/MM', True),
 ]
 
@@ -150,6 +158,32 @@ def _parse_by_format(
         year = 1900 + yy if yy > 50 else 2000 + yy
         return date(year, month, day)
 
+    # DDMONYY: "25JUN20" -> groups: (25, JUN, 20)
+    if format_name == 'DDMONYY':
+        day_str = match.group(1)
+        mon_str = match.group(2)
+        yy_str = match.group(3)
+        yy = int(yy_str)
+        year = 1900 + yy if yy > 50 else 2000 + yy
+        parsed = dateutil_parser.parse(f"{day_str} {mon_str} {year}", dayfirst=True).date()
+        return parsed
+
+    # DDMON: "25JUN" -> groups: (25, JUN), no year
+    if format_name == 'DDMON':
+        day_str = match.group(1)
+        mon_str = match.group(2)
+        if period_start:
+            year = period_start.year
+        elif period_end:
+            year = period_end.year
+        else:
+            year = date.today().year
+        parsed = dateutil_parser.parse(f"{day_str} {mon_str} {year}", dayfirst=True).date()
+        # Handle year wrap (statement crosses Dec->Jan)
+        if period_start and period_start.month >= 11 and parsed.month <= 2:
+            parsed = parsed.replace(year=period_start.year + 1)
+        return parsed
+
     if 'MON' in format_name or 'MONTH' in format_name:
         return dateutil_parser.parse(match.group(0), dayfirst=True).date()
 
@@ -183,5 +217,6 @@ def is_date_like(text: str) -> bool:
         r'\d{1,2}[/\-\.]\d{1,2}[/\-\.]\d{2,4}',
         r'\d{1,2}\s+(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)',
         r'\d{4}-\d{2}-\d{2}',
+        r'\d{1,2}(JAN|FEB|MAR|APR|MAY|JUN|JUL|AUG|SEP|OCT|NOV|DEC)',
     ]
     return any(re.search(p, text, re.IGNORECASE) for p in date_patterns)

@@ -127,6 +127,7 @@ HEADER_MAP = {
     ColumnRole.DESCRIPTION: ["description", "details", "particulars", "narrative", "transaction"],
     ColumnRole.DEBIT: ["debit", "paid out", "money out", "withdrawal", "payments", "dr"],
     ColumnRole.CREDIT: ["credit", "paid in", "money in", "deposit", "receipts", "cr"],
+    ColumnRole.SINGLE_AMOUNT: ["amount"],
     ColumnRole.BALANCE: ["balance", "running", "closing"],
     ColumnRole.REFERENCE: ["ref", "reference", "cheque"],
     ColumnRole.TYPE: ["type", "code"],
@@ -134,12 +135,20 @@ HEADER_MAP = {
 
 
 def _match_header(header_text: str) -> Optional[ColumnRole]:
-    """Match a header text to a column role."""
+    """Match a header text to a column role. Strips currency prefixes first."""
     h = header_text.lower().strip()
     if not h:
         return None
 
-    # Check most specific first
+    # Strip currency prefixes: "(GBP) Amount" -> "amount", "(gbp) balance" -> "balance"
+    h = re.sub(r'\(\s*(?:gbp|eur|usd|currency)\s*\)\s*', '', h, flags=re.IGNORECASE).strip()
+    # Also strip standalone currency prefix without parens: "GBP Amount" -> "amount"
+    h = re.sub(r'^(?:gbp|eur|usd)\s+', '', h, flags=re.IGNORECASE).strip()
+
+    if not h:
+        return None
+
+    # Check most specific multi-word matches first
     if "value" in h and "date" in h:
         return ColumnRole.VALUE_DATE
     if "paid out" in h or "money out" in h:

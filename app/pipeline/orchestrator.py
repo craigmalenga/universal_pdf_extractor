@@ -651,8 +651,18 @@ class DocumentPipeline:
                     amt_result = parse_amount_uk(text)
                     if amt_result.amount is not None:
                         result["parsed_amount"] = abs(amt_result.amount)
-                        result["direction"] = "UNKNOWN"
-                        result["direction_source"] = "single_amount"
+                        if amt_result.amount < 0:
+                            result["direction"] = "DEBIT"
+                            result["direction_source"] = "sign_negative"
+                            result["direction_confidence"] = 0.95
+                        elif amt_result.amount > 0:
+                            result["direction"] = "CREDIT"
+                            result["direction_source"] = "sign_positive"
+                            result["direction_confidence"] = 0.90
+                        else:
+                            result["direction"] = "UNKNOWN"
+                            result["direction_source"] = "single_amount_zero"
+                            result["direction_confidence"] = 0.5
                         result["amount_confidence"] = amt_result.confidence
 
             elif role == ColumnRole.BALANCE:
@@ -1192,19 +1202,56 @@ class DocumentPipeline:
 
         return tx_records
 
+
+    def _passes_quality_gate(self, tx_data: dict) -> bool:
+        """
+        Quality gate: filter out garbage/summary rows before persistence.
+        Returns True if the row should be kept, False to discard.
+        """
+        has_amount = tx_data.get("parsed_amount") is not None
+        has_description = bool(tx_data.get("description", "").strip())
+
+        # Must have an amount (balance-only rows are summary leakage)
+        if not has_amount:
+            return False
+
+        # Check for summary/header row text
+        desc = tx_data.get("description", "").lower()
+        summary_keywords = [
+            "total balance", "total outgoings", "total deposits",
+            "balance in pots", "personal account balance",
+            "including all pots", "excluding all pots",
+            "brought forward", "carried forward",
+            "total withdrawn", "total paid in",
+            "opening balance", "closing balance",
+            "balance brought", "balance carried",
+        ]
+        if any(kw in desc for kw in summary_keywords):
+            return False
+
+        return True
+
+
     def _map_table_columns(self, header: list[str]) -> dict:
         """Map header row to column roles for pdfplumber fallback."""
         result = {"date_col": None, "desc_col": None, "amount_cols": []}
 
         date_kw = ["date"]
         desc_kw = ["description", "details", "particulars", "narrative", "transaction"]
-        paid_in_kw = ["paid in", "credit", "money in", "deposit", "in"]
-        withdrawn_kw = ["withdrawn", "debit", "money out", "paid out", "withdrawal", "out"]
+        paid_in_kw = ["paid in", "credit", "money in", "deposit", "receipts"]
+        withdrawn_kw = ["withdrawn", "debit", "money out", "paid out", "withdrawal", "payments"]
         balance_kw = ["balance"]
         amount_kw = ["amount"]
 
         for i, h in enumerate(header):
             h_lower = h.lower().strip()
+            if not h_lower:
+                continue
+
+            # Strip currency prefixes like "(GBP)"
+            h_lower = re.sub(r'\(\s*(?:gbp|eur|usd|currency)\s*\)\s*', '', h_lower).strip()
+            h_lower = re.sub(r'^(?:gbp|eur|usd)\s+', '', h_lower).strip()
+
             if not h_lower:
                 continue
 

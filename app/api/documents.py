@@ -228,6 +228,9 @@ async def export_all_transactions_csv(
     result = await session.execute(
         select(Transaction, Document.file_name)
         .join(Document, Transaction.doc_id == Document.doc_id)
+        .where(
+            Transaction.amount.isnot(None),
+        )
         .order_by(Document.file_name, Transaction.row_index)
     )
     rows = result.all()
@@ -378,6 +381,8 @@ async def get_document_transactions(
                 confidence_amount=float(t.confidence_amount) if t.confidence_amount else None,
                 confidence_direction=float(t.confidence_direction) if t.confidence_direction else None,
                 confidence_date=float(t.confidence_date) if t.confidence_date else None,
+                confidence_description=float(t.confidence_description) if t.confidence_description else None,
+                confidence_balance=float(t.confidence_balance) if t.confidence_balance else None,
             )
             for t in txns
         ],
@@ -413,7 +418,10 @@ async def export_transactions_csv(
     # Get transactions
     result = await session.execute(
         select(Transaction)
-        .where(Transaction.doc_id == doc_uuid)
+        .where(
+            Transaction.doc_id == doc_uuid,
+            Transaction.amount.isnot(None),
+        )
         .order_by(Transaction.row_index)
     )
     txns = result.scalars().all()
