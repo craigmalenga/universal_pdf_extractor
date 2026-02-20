@@ -2,6 +2,8 @@
 FastAPI application factory.
 """
 
+import os
+import sys
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
@@ -11,6 +13,12 @@ from app.config import settings
 from app.api.router import api_router
 from app.models.database import close_db
 from app.observability.logging import setup_logging
+
+# Startup print - visible in Railway logs immediately
+print(f"[STARTUP] Statement Extraction Platform v{settings.APP_VERSION}", flush=True)
+print(f"[STARTUP] PORT={os.environ.get('PORT', 'NOT SET')}", flush=True)
+print(f"[STARTUP] DATABASE_URL={'SET' if settings.DATABASE_URL else 'NOT SET'}", flush=True)
+print(f"[STARTUP] Python {sys.version}", flush=True)
 
 
 @asynccontextmanager
