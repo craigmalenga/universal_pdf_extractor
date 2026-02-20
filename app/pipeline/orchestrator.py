@@ -423,6 +423,15 @@ class DocumentPipeline:
         if not amount_cols:
             logger.warning("no_amount_columns", segment=segment.segment_index,
                            columns=len(columns), roles={i: r.value for i, r in roles.items()})
+            # ── FALLBACK: Try pdfplumber native table extraction ──
+            logger.info("trying_pdfplumber_fallback", segment=segment.segment_index)
+            fallback_txns = await self._analyse_segment_pdfplumber_fallback(
+                session, doc_id, run_id, segment, extractions
+            )
+            if fallback_txns:
+                logger.info("pdfplumber_fallback_success",
+                            segment=segment.segment_index, transactions=len(fallback_txns))
+                return fallback_txns, 0
             return [], 0
 
         # Reconstruct rows with proper column knowledge
@@ -622,5 +631,318 @@ class DocumentPipeline:
                     bal_result = parse_amount_uk(text)
                     if bal_result.amount is not None:
                         result["parsed_balance"] = bal_result.amount
+
+        return result
+
+    # ─── Fallback: pdfplumber native table extraction ─────────
+
+    async def _analyse_segment_pdfplumber_fallback(
+        self,
+        session: AsyncSession,
+        doc_id: str,
+        run_id: str,
+        segment: DocumentSegment,
+        extractions: list[NormalizedPageExtraction],
+    ) -> list[Transaction]:
+        """
+        Fallback: use pdfplumber's built-in extract_tables() when our
+        custom column detection fails. This handles structured PDFs where
+        the table has clear column positions in the PDF structure.
+        """
+        import pdfplumber
+
+        doc = await self._load_document(session, doc_id)
+        pdf_path = self._get_pdf_path(doc)
+
+        tx_records = []
+
+        try:
+            with pdfplumber.open(pdf_path) as pdf:
+                for page_idx in range(segment.start_page, segment.end_page + 1):
+                    if page_idx >= len(pdf.pages):
+                        continue
+                    page = pdf.pages[page_idx]
+
+                    tables = page.extract_tables({
+                        "vertical_strategy": "text",
+                        "horizontal_strategy": "text",
+                        "snap_tolerance": 5,
+                        "join_tolerance": 5,
+                        "min_words_vertical": 2,
+                        "min_words_horizontal": 1,
+                    })
+
+                    if not tables:
+                        # Try with lines strategy
+                        tables = page.extract_tables({
+                            "vertical_strategy": "lines",
+                            "horizontal_strategy": "lines",
+                        })
+
+                    for table in tables:
+                        if not table or len(table) < 2:
+                            continue
+
+                        # Try to identify column roles from header row
+                        header = [str(c).lower().strip() if c else "" for c in table[0]]
+                        col_map = self._map_table_columns(header)
+
+                        if not col_map.get("amount_cols"):
+                            # Try second row as header
+                            if len(table) > 2:
+                                header = [str(c).lower().strip() if c else "" for c in table[1]]
+                                col_map = self._map_table_columns(header)
+                                data_rows = table[2:]
+                            else:
+                                continue
+                        else:
+                            data_rows = table[1:]
+
+                        # Process data rows
+                        last_date = None
+                        for row in data_rows:
+                            row_strs = [str(c).strip() if c else "" for c in row]
+
+                            # Extract date
+                            date_val = None
+                            if col_map.get("date_col") is not None:
+                                raw_date = row_strs[col_map["date_col"]]
+                                if raw_date:
+                                    date_val = parse_date_uk(raw_date)
+                                    if date_val:
+                                        last_date = date_val
+                                elif last_date:
+                                    date_val = last_date
+
+                            # Extract description
+                            desc = ""
+                            if col_map.get("desc_col") is not None:
+                                desc = row_strs[col_map["desc_col"]]
+
+                            # Extract amounts
+                            amount = None
+                            direction = "UNKNOWN"
+                            balance = None
+
+                            for ac in col_map.get("amount_cols", []):
+                                idx, role = ac["index"], ac["role"]
+                                if idx < len(row_strs) and row_strs[idx]:
+                                    amt_result = parse_amount_uk(row_strs[idx])
+                                    if amt_result.amount is not None:
+                                        if role == "paid_in":
+                                            amount = abs(amt_result.amount)
+                                            direction = "CREDIT"
+                                        elif role == "withdrawn":
+                                            amount = abs(amt_result.amount)
+                                            direction = "DEBIT"
+                                        elif role == "balance":
+                                            balance = amt_result.amount
+                                        elif role == "amount" and amount is None:
+                                            amount = abs(amt_result.amount)
+
+                            # Skip rows with no amount (headers, balance markers, noise)
+                            if amount is None and balance is None:
+                                continue
+
+                            # Skip if description looks like a balance marker
+                            from app.pipeline.table_extractor import is_balance_marker
+                            if is_balance_marker(desc):
+                                continue
+
+                            tx_rec = Transaction(
+                                doc_id=uuid.UUID(doc_id),
+                                run_id=uuid.UUID(run_id),
+                                segment_index=segment.segment_index,
+                                row_index=len(tx_records),
+                                posted_date=date_val,
+                                description=desc[:500] if desc else "",
+                                amount=amount,
+                                direction=direction,
+                                direction_source="pdfplumber_table",
+                                balance=balance,
+                                balance_confirmed=False,
+                                page_index=page_idx,
+                                confidence_amount=Decimal("0.80"),
+                                confidence_date=Decimal("0.80") if date_val else Decimal("0.30"),
+                                confidence_direction=Decimal("0.90") if direction != "UNKNOWN" else Decimal("0.40"),
+                            )
+                            session.add(tx_rec)
+                            tx_records.append(tx_rec)
+
+            await session.flush()
+
+        except Exception as e:
+            logger.error("pdfplumber_fallback_failed",
+                         segment=segment.segment_index, error=str(e),
+                         traceback=traceback.format_exc())
+
+        if not tx_records:
+            # Try Camelot as final fallback
+            logger.info("trying_camelot_fallback", segment=segment.segment_index)
+            return await self._analyse_segment_camelot_fallback(
+                session, doc_id, run_id, segment
+            )
+
+        return tx_records
+
+    # ─── Fallback: Camelot table extraction ───────────────────
+
+    async def _analyse_segment_camelot_fallback(
+        self,
+        session: AsyncSession,
+        doc_id: str,
+        run_id: str,
+        segment: DocumentSegment,
+    ) -> list[Transaction]:
+        """Final fallback: Camelot stream then lattice."""
+        try:
+            import camelot
+        except ImportError:
+            logger.warning("camelot_not_installed")
+            return []
+
+        doc = await self._load_document(session, doc_id)
+        pdf_path = self._get_pdf_path(doc)
+        page_range = f"{segment.start_page + 1}-{segment.end_page + 1}"
+
+        tx_records = []
+
+        for flavor in ["stream", "lattice"]:
+            try:
+                tables = camelot.read_pdf(
+                    pdf_path, pages=page_range, flavor=flavor, suppress_stdout=True
+                )
+                if not tables:
+                    continue
+
+                col_map = {}
+                header_found = False
+
+                for table in tables:
+                    df = table.df
+                    for ri in range(df.shape[0]):
+                        cells = [str(df.iloc[ri, ci]).strip() for ci in range(df.shape[1])]
+                        row_lower = " ".join(cells).lower()
+
+                        # Detect header
+                        if not header_found and any(kw in row_lower for kw in
+                                ["date", "description", "paid in", "withdrawn",
+                                 "balance", "money in", "money out", "debit", "credit"]):
+                            header = [c.lower() for c in cells]
+                            col_map = self._map_table_columns(header)
+                            if col_map.get("amount_cols"):
+                                header_found = True
+                                logger.info("camelot_header_found", flavor=flavor, col_map=col_map)
+                            continue
+
+                        if not header_found or not col_map.get("amount_cols"):
+                            continue
+
+                        if any(kw in row_lower for kw in ["brought forward", "carried forward", "b/f", "c/f"]):
+                            continue
+
+                        # Extract fields using existing column map
+                        row_strs = cells
+                        date_val = None
+                        if col_map.get("date_col") is not None and col_map["date_col"] < len(row_strs):
+                            raw_date = row_strs[col_map["date_col"]]
+                            if raw_date:
+                                date_val = parse_date_uk(raw_date)
+
+                        desc = ""
+                        if col_map.get("desc_col") is not None and col_map["desc_col"] < len(row_strs):
+                            desc = row_strs[col_map["desc_col"]]
+
+                        amount = None
+                        direction = "UNKNOWN"
+                        balance = None
+
+                        for ac in col_map.get("amount_cols", []):
+                            idx, role = ac["index"], ac["role"]
+                            if idx < len(row_strs) and row_strs[idx]:
+                                amt_result = parse_amount_uk(row_strs[idx])
+                                if amt_result.amount is not None:
+                                    if role == "paid_in":
+                                        amount = abs(amt_result.amount)
+                                        direction = "CREDIT"
+                                    elif role == "withdrawn":
+                                        amount = abs(amt_result.amount)
+                                        direction = "DEBIT"
+                                    elif role == "balance":
+                                        balance = amt_result.amount
+                                    elif role == "amount" and amount is None:
+                                        amount = abs(amt_result.amount)
+
+                        if amount is None and balance is None:
+                            continue
+
+                        from app.pipeline.table_extractor import is_balance_marker
+                        if is_balance_marker(desc):
+                            continue
+
+                        tx_rec = Transaction(
+                            doc_id=uuid.UUID(doc_id),
+                            run_id=uuid.UUID(run_id),
+                            segment_index=segment.segment_index,
+                            row_index=len(tx_records),
+                            posted_date=date_val,
+                            description=desc[:500].replace("\n", " ") if desc else "",
+                            amount=amount,
+                            direction=direction,
+                            direction_source=f"camelot_{flavor}",
+                            balance=balance,
+                            balance_confirmed=False,
+                            page_index=segment.start_page,
+                            confidence_amount=Decimal("0.75"),
+                            confidence_date=Decimal("0.75") if date_val else Decimal("0.30"),
+                            confidence_direction=Decimal("0.85") if direction != "UNKNOWN" else Decimal("0.40"),
+                        )
+                        session.add(tx_rec)
+                        tx_records.append(tx_rec)
+
+                if tx_records:
+                    await session.flush()
+                    logger.info("camelot_fallback_success", flavor=flavor, transactions=len(tx_records))
+                    return tx_records
+
+            except Exception as e:
+                logger.warning("camelot_fallback_error", flavor=flavor, error=str(e))
+                continue
+
+        return tx_records
+
+    def _map_table_columns(self, header: list[str]) -> dict:
+        """Map header row to column roles for pdfplumber fallback."""
+        result = {"date_col": None, "desc_col": None, "amount_cols": []}
+
+        date_kw = ["date"]
+        desc_kw = ["description", "details", "particulars", "narrative", "transaction"]
+        paid_in_kw = ["paid in", "credit", "money in", "deposit", "in"]
+        withdrawn_kw = ["withdrawn", "debit", "money out", "paid out", "withdrawal", "out"]
+        balance_kw = ["balance"]
+        amount_kw = ["amount"]
+
+        for i, h in enumerate(header):
+            h_lower = h.lower().strip()
+            if not h_lower:
+                continue
+
+            if any(kw in h_lower for kw in date_kw) and result["date_col"] is None:
+                result["date_col"] = i
+
+            elif any(kw in h_lower for kw in desc_kw) and result["desc_col"] is None:
+                result["desc_col"] = i
+
+            elif any(kw in h_lower for kw in paid_in_kw):
+                result["amount_cols"].append({"index": i, "role": "paid_in"})
+
+            elif any(kw in h_lower for kw in withdrawn_kw):
+                result["amount_cols"].append({"index": i, "role": "withdrawn"})
+
+            elif any(kw in h_lower for kw in balance_kw):
+                result["amount_cols"].append({"index": i, "role": "balance"})
+
+            elif any(kw in h_lower for kw in amount_kw):
+                result["amount_cols"].append({"index": i, "role": "amount"})
 
         return result
