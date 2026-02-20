@@ -82,25 +82,31 @@ class DocumentPipeline:
         async with async_session_factory() as session:
             try:
                 # ── Cleanup old attempts ──
-                from sqlalchemy import delete
+                from sqlalchemy import text
                 doc_uuid = uuid.UUID(doc_id)
-                # Delete in FK order: evidence → transactions → detected_tables → pages → segments → runs
-                await session.execute(
-                    delete(Transaction).where(Transaction.doc_id == doc_uuid)
-                )
-                await session.execute(
-                    delete(DetectedTable).where(DetectedTable.doc_id == doc_uuid)
-                )
-                await session.execute(
-                    delete(Page).where(Page.doc_id == doc_uuid)
-                )
-                await session.execute(
-                    delete(DocumentSegment).where(DocumentSegment.doc_id == doc_uuid)
-                )
-                await session.execute(
-                    delete(ExtractionRun).where(ExtractionRun.doc_id == doc_uuid)
-                )
+                doc_str = str(doc_uuid)
+                # Delete in FK order using raw SQL to avoid session issues
+                await session.execute(text(
+                    "DELETE FROM transaction_evidence WHERE transaction_id IN "
+                    "(SELECT transaction_id FROM transactions WHERE doc_id = :did)"
+                ), {"did": doc_str})
+                await session.execute(text(
+                    "DELETE FROM transactions WHERE doc_id = :did"
+                ), {"did": doc_str})
+                await session.execute(text(
+                    "DELETE FROM detected_tables WHERE doc_id = :did"
+                ), {"did": doc_str})
+                await session.execute(text(
+                    "DELETE FROM pages WHERE doc_id = :did"
+                ), {"did": doc_str})
+                await session.execute(text(
+                    "DELETE FROM document_segments WHERE doc_id = :did"
+                ), {"did": doc_str})
+                await session.execute(text(
+                    "DELETE FROM extraction_runs WHERE doc_id = :did"
+                ), {"did": doc_str})
                 await session.commit()
+                logger.info("cleanup_complete", doc_id=doc_id)
 
                 # ── Stage 1: LOAD ──
                 await self._update_status(session, doc_id, "RENDERING")
@@ -647,15 +653,15 @@ class DocumentPipeline:
     ) -> list[Transaction]:
         """
         Fallback: use pdfplumber's built-in extract_tables() when our
-        custom column detection fails. This handles structured PDFs where
-        the table has clear column positions in the PDF structure.
+        custom column detection fails.
+        Parses into plain dicts first, then persists — keeping session clean.
         """
         import pdfplumber
 
         doc = await self._load_document(session, doc_id)
         pdf_path = self._get_pdf_path(doc)
 
-        tx_records = []
+        parsed_rows = []  # Collect as dicts, persist later
 
         try:
             with pdfplumber.open(pdf_path) as pdf:
@@ -674,7 +680,6 @@ class DocumentPipeline:
                     })
 
                     if not tables:
-                        # Try with lines strategy
                         tables = page.extract_tables({
                             "vertical_strategy": "lines",
                             "horizontal_strategy": "lines",
@@ -684,12 +689,10 @@ class DocumentPipeline:
                         if not table or len(table) < 2:
                             continue
 
-                        # Try to identify column roles from header row
                         header = [str(c).lower().strip() if c else "" for c in table[0]]
                         col_map = self._map_table_columns(header)
 
                         if not col_map.get("amount_cols"):
-                            # Try second row as header
                             if len(table) > 2:
                                 header = [str(c).lower().strip() if c else "" for c in table[1]]
                                 col_map = self._map_table_columns(header)
@@ -699,12 +702,10 @@ class DocumentPipeline:
                         else:
                             data_rows = table[1:]
 
-                        # Process data rows
                         last_date = None
                         for row in data_rows:
                             row_strs = [str(c).strip() if c else "" for c in row]
 
-                            # Extract date
                             date_val = None
                             if col_map.get("date_col") is not None:
                                 raw_date = row_strs[col_map["date_col"]]
@@ -715,12 +716,10 @@ class DocumentPipeline:
                                 elif last_date:
                                     date_val = last_date
 
-                            # Extract description
                             desc = ""
                             if col_map.get("desc_col") is not None:
                                 desc = row_strs[col_map["desc_col"]]
 
-                            # Extract amounts
                             amount = None
                             direction = "UNKNOWN"
                             balance = None
@@ -741,47 +740,69 @@ class DocumentPipeline:
                                         elif role == "amount" and amount is None:
                                             amount = abs(amt_result.amount)
 
-                            # Skip rows with no amount (headers, balance markers, noise)
                             if amount is None and balance is None:
                                 continue
 
-                            # Skip if description looks like a balance marker
                             from app.pipeline.table_extractor import is_balance_marker
                             if is_balance_marker(desc):
                                 continue
 
-                            tx_rec = Transaction(
-                                doc_id=uuid.UUID(doc_id),
-                                run_id=uuid.UUID(run_id),
-                                segment_id=segment.segment_id,
-                                row_index=len(tx_records),
-                                posted_date=date_val,
-                                description_raw=desc[:500] if desc else "",
-                                description_clean=(desc[:500] if desc else "").strip(),
-                                amount=amount,
-                                direction=direction,
-                                direction_source="pdfplumber_table",
-                                running_balance=balance,
-                                balance_confirmed=False,
-                                page_index=page_idx,
-                                confidence_overall=Decimal("0.80"),
-                                confidence_amount=Decimal("0.80"),
-                                confidence_date=Decimal("0.80") if date_val else Decimal("0.30"),
-                                confidence_direction=Decimal("0.90") if direction != "UNKNOWN" else Decimal("0.40"),
-                            )
-                            session.add(tx_rec)
-                            tx_records.append(tx_rec)
-
-            await session.flush()
+                            parsed_rows.append({
+                                "date_val": date_val,
+                                "desc": desc[:500] if desc else "",
+                                "amount": amount,
+                                "direction": direction,
+                                "balance": balance,
+                                "page_idx": page_idx,
+                            })
 
         except Exception as e:
-            logger.error("pdfplumber_fallback_failed",
-                         segment=segment.segment_index, error=str(e),
-                         traceback=traceback.format_exc())
+            logger.error("pdfplumber_fallback_parse_failed",
+                         segment=segment.segment_index, error=str(e))
 
-        if not tx_records:
+        if not parsed_rows:
             # Try Camelot as final fallback
             logger.info("trying_camelot_fallback", segment=segment.segment_index)
+            return await self._analyse_segment_camelot_fallback(
+                session, doc_id, run_id, segment
+            )
+
+        # Persist parsed rows using savepoint so failure doesn't dirty session
+        tx_records = []
+        try:
+            async with session.begin_nested():
+                for idx, pr in enumerate(parsed_rows):
+                    tx_rec = Transaction(
+                        doc_id=uuid.UUID(doc_id),
+                        run_id=uuid.UUID(run_id),
+                        segment_id=segment.segment_id,
+                        row_index=idx,
+                        posted_date=pr["date_val"],
+                        description_raw=pr["desc"],
+                        description_clean=pr["desc"].strip(),
+                        amount=pr["amount"],
+                        direction=pr["direction"],
+                        direction_source="pdfplumber_table",
+                        running_balance=pr["balance"],
+                        balance_confirmed=False,
+                        page_index=pr["page_idx"],
+                        confidence_overall=Decimal("0.80"),
+                        confidence_amount=Decimal("0.80"),
+                        confidence_date=Decimal("0.80") if pr["date_val"] else Decimal("0.30"),
+                        confidence_direction=Decimal("0.90") if pr["direction"] != "UNKNOWN" else Decimal("0.40"),
+                    )
+                    session.add(tx_rec)
+                    tx_records.append(tx_rec)
+            # Savepoint committed successfully
+            logger.info("pdfplumber_fallback_persisted", transactions=len(tx_records))
+
+        except Exception as e:
+            logger.error("pdfplumber_fallback_persist_failed",
+                         segment=segment.segment_index, error=str(e))
+            tx_records = []
+            # Savepoint rolled back automatically, session is clean
+            # Try Camelot as final fallback
+            logger.info("trying_camelot_fallback_after_persist_fail", segment=segment.segment_index)
             return await self._analyse_segment_camelot_fallback(
                 session, doc_id, run_id, segment
             )
@@ -905,32 +926,35 @@ class DocumentPipeline:
         if not parsed_rows:
             return tx_records
 
-        # Now persist — session is clean at this point
-        for idx, pr in enumerate(parsed_rows):
-            tx_rec = Transaction(
-                doc_id=uuid.UUID(doc_id),
-                run_id=uuid.UUID(run_id),
-                segment_id=segment.segment_id,
-                row_index=idx,
-                posted_date=pr["date_val"],
-                description_raw=pr["desc"],
-                description_clean=pr["desc"].strip(),
-                amount=pr["amount"],
-                direction=pr["direction"],
-                direction_source=f"camelot_{pr['flavor']}",
-                running_balance=pr["balance"],
-                balance_confirmed=False,
-                page_index=segment.start_page,
-                confidence_overall=Decimal("0.75"),
-                confidence_amount=Decimal("0.75"),
-                confidence_date=Decimal("0.75") if pr["date_val"] else Decimal("0.30"),
-                confidence_direction=Decimal("0.85") if pr["direction"] != "UNKNOWN" else Decimal("0.40"),
-            )
-            session.add(tx_rec)
-            tx_records.append(tx_rec)
-
-        await session.flush()
-        logger.info("camelot_fallback_persisted", transactions=len(tx_records))
+        # Persist using savepoint so failure doesn't dirty session
+        try:
+            async with session.begin_nested():
+                for idx, pr in enumerate(parsed_rows):
+                    tx_rec = Transaction(
+                        doc_id=uuid.UUID(doc_id),
+                        run_id=uuid.UUID(run_id),
+                        segment_id=segment.segment_id,
+                        row_index=idx,
+                        posted_date=pr["date_val"],
+                        description_raw=pr["desc"],
+                        description_clean=pr["desc"].strip(),
+                        amount=pr["amount"],
+                        direction=pr["direction"],
+                        direction_source=f"camelot_{pr['flavor']}",
+                        running_balance=pr["balance"],
+                        balance_confirmed=False,
+                        page_index=segment.start_page,
+                        confidence_overall=Decimal("0.75"),
+                        confidence_amount=Decimal("0.75"),
+                        confidence_date=Decimal("0.75") if pr["date_val"] else Decimal("0.30"),
+                        confidence_direction=Decimal("0.85") if pr["direction"] != "UNKNOWN" else Decimal("0.40"),
+                    )
+                    session.add(tx_rec)
+                    tx_records.append(tx_rec)
+            logger.info("camelot_fallback_persisted", transactions=len(tx_records))
+        except Exception as e:
+            logger.error("camelot_fallback_persist_failed", error=str(e))
+            tx_records = []
 
         return tx_records
 
