@@ -63,3 +63,5 @@ async def get_job_status(job_id: str):
         )
     except Exception as e:
         raise HTTPException(status_code=404, detail=f"Job not found: {str(e)}")
+    
+    
