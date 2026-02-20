@@ -5,9 +5,12 @@ FastAPI application factory.
 import os
 import sys
 from contextlib import asynccontextmanager
+from pathlib import Path
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import HTMLResponse
+from fastapi.templating import Jinja2Templates
 
 from app.config import settings
 from app.api.router import api_router
@@ -19,6 +22,10 @@ print(f"[STARTUP] Statement Extraction Platform v{settings.APP_VERSION}", flush=
 print(f"[STARTUP] PORT={os.environ.get('PORT', 'NOT SET')}", flush=True)
 print(f"[STARTUP] DATABASE_URL={'SET' if settings.DATABASE_URL else 'NOT SET'}", flush=True)
 print(f"[STARTUP] Python {sys.version}", flush=True)
+
+# Templates
+TEMPLATES_DIR = Path(__file__).parent / "templates"
+templates = Jinja2Templates(directory=str(TEMPLATES_DIR))
 
 
 @asynccontextmanager
@@ -69,6 +76,14 @@ def create_app() -> FastAPI:
 
     # Include all API routes
     app.include_router(api_router)
+
+    # Dashboard at /
+    @app.get("/", response_class=HTMLResponse)
+    async def dashboard(request: Request):
+        return templates.TemplateResponse("index.html", {
+            "request": request,
+            "version": settings.APP_VERSION,
+        })
 
     return app
 
