@@ -203,6 +203,50 @@ async def process_all_queued(
     return {"processed": len(results), "results": results}
 
 
+@router.get("/export/all-csv")
+async def export_all_transactions_csv(
+    session: AsyncSession = Depends(get_db),
+):
+    """Export all transactions across all documents as a single CSV."""
+    import csv
+    import io
+    from fastapi.responses import StreamingResponse
+
+    result = await session.execute(
+        select(Transaction, Document.file_name)
+        .join(Document, Transaction.doc_id == Document.doc_id)
+        .order_by(Document.file_name, Transaction.row_index)
+    )
+    rows = result.all()
+
+    output = io.StringIO()
+    writer = csv.writer(output)
+    writer.writerow([
+        "File", "Date", "Description", "Amount", "Direction", "Balance",
+        "Direction Source", "Confidence", "Balance Confirmed"
+    ])
+
+    for t, fname in rows:
+        writer.writerow([
+            fname or "",
+            str(t.posted_date) if t.posted_date else "",
+            t.description_raw or t.description_clean or "",
+            str(t.amount) if t.amount else "",
+            t.direction or "",
+            str(t.running_balance) if t.running_balance else "",
+            t.direction_source or "",
+            str(t.confidence_overall) if t.confidence_overall else "",
+            "Yes" if t.balance_confirmed else "No",
+        ])
+
+    output.seek(0)
+    return StreamingResponse(
+        iter([output.getvalue()]),
+        media_type="text/csv",
+        headers={"Content-Disposition": 'attachment; filename="all_transactions.csv"'},
+    )
+
+
 @router.get("/{doc_id}", response_model=DocumentDetail)
 async def get_document(
     doc_id: str,
@@ -327,6 +371,71 @@ async def get_document_transactions(
         total=len(txns),
         run_id=str(run_uuid),
         doc_id=doc_id,
+    )
+
+
+@router.get("/{doc_id}/export/csv")
+async def export_transactions_csv(
+    doc_id: str,
+    session: AsyncSession = Depends(get_db),
+):
+    """Export document transactions as a downloadable CSV file."""
+    import csv
+    import io
+    from fastapi.responses import StreamingResponse
+
+    try:
+        doc_uuid = uuid.UUID(doc_id)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid document ID")
+
+    # Get document for filename
+    result = await session.execute(
+        select(Document).where(Document.doc_id == doc_uuid)
+    )
+    doc = result.scalar_one_or_none()
+    if not doc:
+        raise HTTPException(status_code=404, detail="Document not found")
+
+    # Get transactions
+    result = await session.execute(
+        select(Transaction)
+        .where(Transaction.doc_id == doc_uuid)
+        .order_by(Transaction.row_index)
+    )
+    txns = result.scalars().all()
+
+    if not txns:
+        raise HTTPException(status_code=404, detail="No transactions found for this document")
+
+    # Build CSV
+    output = io.StringIO()
+    writer = csv.writer(output)
+    writer.writerow([
+        "Date", "Description", "Amount", "Direction", "Balance",
+        "Direction Source", "Confidence", "Balance Confirmed"
+    ])
+
+    for t in txns:
+        writer.writerow([
+            str(t.posted_date) if t.posted_date else "",
+            t.description_raw or t.description_clean or "",
+            str(t.amount) if t.amount else "",
+            t.direction or "",
+            str(t.running_balance) if t.running_balance else "",
+            t.direction_source or "",
+            str(t.confidence_overall) if t.confidence_overall else "",
+            "Yes" if t.balance_confirmed else "No",
+        ])
+
+    output.seek(0)
+    safe_name = (doc.file_name or "export").replace(".pdf", "").replace(" ", "_")
+    filename = f"{safe_name}_transactions.csv"
+
+    return StreamingResponse(
+        iter([output.getvalue()]),
+        media_type="text/csv",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
     )
 
 
