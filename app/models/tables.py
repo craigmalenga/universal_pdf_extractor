@@ -22,7 +22,7 @@ from sqlalchemy import (
     UniqueConstraint,
     text,
 )
-from sqlalchemy.dialects.postgresql import JSONB, UUID
+from sqlalchemy.dialects.postgresql import JSONB, UUID, ENUM
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.models.database import Base
@@ -44,7 +44,8 @@ class Document(Base):
     mime_type: Mapped[str] = mapped_column(Text, nullable=False)
     page_count: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
     doc_family: Mapped[str] = mapped_column(
-        String(20), nullable=False, default="UNKNOWN", server_default="UNKNOWN"
+        ENUM('BANK_STATEMENT', 'MOTOR_FINANCE', 'UNKNOWN', name='doc_family_enum', create_type=False),
+        nullable=False, default="UNKNOWN", server_default="UNKNOWN"
     )
     doc_family_confidence: Mapped[Optional[Decimal]] = mapped_column(
         Numeric(5, 4), nullable=True
@@ -58,7 +59,8 @@ class Document(Base):
     )
     raw_file_uri: Mapped[str] = mapped_column(Text, nullable=False)
     status: Mapped[str] = mapped_column(
-        String(20), nullable=False, default="UPLOADED", server_default="UPLOADED"
+        ENUM('UPLOADED', 'QUEUED', 'RENDERING', 'PREPROCESSING', 'SEGMENTING', 'EXTRACTING', 'VALIDATING', 'COMPLETED', 'NEEDS_REVIEW', 'FAILED', name='doc_status_enum', create_type=False),
+        nullable=False, default="UPLOADED", server_default="UPLOADED"
     )
     callback_url: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     priority: Mapped[int] = mapped_column(
@@ -203,9 +205,13 @@ class ExtractionRun(Base):
     )
     duration_ms: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
     status: Mapped[str] = mapped_column(
-        String(20), nullable=False, default="RUNNING", server_default="RUNNING"
+        ENUM('RUNNING', 'COMPLETED', 'FAILED', name='extraction_status_enum', create_type=False),
+        nullable=False, default="RUNNING", server_default="RUNNING"
     )
-    validation_status: Mapped[Optional[str]] = mapped_column(String(20), nullable=True)
+    validation_status: Mapped[Optional[str]] = mapped_column(
+        ENUM('PASS', 'PASS_WITH_WARNINGS', 'NEEDS_REVIEW', 'FAIL', name='validation_status_enum', create_type=False),
+        nullable=True
+    )
     confidence_document: Mapped[Optional[Decimal]] = mapped_column(
         Numeric(5, 4), nullable=True
     )
@@ -256,7 +262,8 @@ class DetectedTable(Base):
     page_index: Mapped[int] = mapped_column(Integer, nullable=False)
     table_index: Mapped[int] = mapped_column(Integer, nullable=False)
     table_type: Mapped[str] = mapped_column(
-        String(30), nullable=False, default="UNKNOWN", server_default="UNKNOWN"
+        ENUM('TRANSACTION_TABLE', 'PAYMENT_SCHEDULE', 'PAYMENTS_RECEIVED', 'FEES_CHARGES', 'SUMMARY', 'INTEREST', 'ARREARS', 'SETTLEMENT', 'OTHER', 'UNKNOWN', name='table_type_enum', create_type=False),
+        nullable=False, default="UNKNOWN", server_default="UNKNOWN"
     )
     table_type_confidence: Mapped[Optional[Decimal]] = mapped_column(
         Numeric(5, 4), nullable=True
@@ -315,7 +322,8 @@ class Transaction(Base):
         String(3), nullable=False, default="GBP", server_default="GBP"
     )
     direction: Mapped[str] = mapped_column(
-        String(10), nullable=False, default="UNKNOWN", server_default="UNKNOWN"
+        ENUM('DEBIT', 'CREDIT', 'UNKNOWN', name='tx_direction_enum', create_type=False),
+        nullable=False, default="UNKNOWN", server_default="UNKNOWN"
     )
     direction_source: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     running_balance: Mapped[Optional[Decimal]] = mapped_column(Numeric(15, 2), nullable=True)
@@ -422,7 +430,8 @@ class Template(Base):
     template_name: Mapped[str] = mapped_column(Text, nullable=False)
     provider_name: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     doc_family: Mapped[str] = mapped_column(
-        String(20), nullable=False, default="BANK_STATEMENT", server_default="BANK_STATEMENT"
+        ENUM('BANK_STATEMENT', 'MOTOR_FINANCE', 'UNKNOWN', name='doc_family_enum', create_type=False),
+        nullable=False, default="BANK_STATEMENT", server_default="BANK_STATEMENT"
     )
     is_active: Mapped[bool] = mapped_column(
         Boolean, nullable=False, default=True, server_default="true"
@@ -505,7 +514,8 @@ class ReviewQueueItem(Base):
     priority: Mapped[int] = mapped_column(Integer, nullable=False, default=5, server_default="5")
     assigned_to: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     status: Mapped[str] = mapped_column(
-        String(20), nullable=False, default="PENDING", server_default="PENDING"
+        ENUM('PENDING', 'IN_REVIEW', 'RESOLVED', 'SKIPPED', name='review_status_enum', create_type=False),
+        nullable=False, default="PENDING", server_default="PENDING"
     )
     resolution_json: Mapped[Optional[dict]] = mapped_column(JSONB, nullable=True)
     resolution_notes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
@@ -539,7 +549,10 @@ class GoldenFixture(Base):
     file_name: Mapped[str] = mapped_column(Text, nullable=False, unique=True)
     file_hash: Mapped[str] = mapped_column(Text, nullable=False)
     bank_name: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
-    doc_family: Mapped[str] = mapped_column(String(20), nullable=False)
+    doc_family: Mapped[str] = mapped_column(
+        ENUM('BANK_STATEMENT', 'MOTOR_FINANCE', 'UNKNOWN', name='doc_family_enum', create_type=False),
+        nullable=False
+    )
     page_count: Mapped[int] = mapped_column(Integer, nullable=False)
     expected_transaction_count: Mapped[int] = mapped_column(Integer, nullable=False)
     expected_json: Mapped[dict] = mapped_column(JSONB, nullable=False)
