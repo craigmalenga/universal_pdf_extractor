@@ -9,40 +9,25 @@ from typing import Optional
 from app.schemas.contracts import BBox, NormalizedPageExtraction
 
 
+class EngineError(Exception):
+    """Raised when an extraction engine fails."""
+    def __init__(self, message: str, engine_name: str = "", error_code: str = "ERR_ENGINE"):
+        self.engine_name = engine_name
+        self.error_code = error_code
+        self.message = message
+        super().__init__(message)
+
+
 class ExtractionEngine(ABC):
     """
     Abstract base class for all extraction engines.
-
-    Every engine must:
-    1. Accept a document/page reference
-    2. Return NormalizedPageExtraction
-    3. Report its name and version
-    4. Handle errors gracefully (raise EngineError, never crash)
+    Every engine must return NormalizedPageExtraction.
     """
 
-    @property
-    @abstractmethod
-    def engine_name(self) -> str:
-        """Unique identifier: 'pdfplumber', 'google_docai', 'tesseract'"""
-        ...
-
-    @property
-    @abstractmethod
-    def engine_version(self) -> str:
-        """Semver or API version string."""
-        ...
-
-    @property
-    @abstractmethod
-    def supports_tables(self) -> bool:
-        """Whether this engine returns structured tables."""
-        ...
-
-    @property
-    @abstractmethod
-    def supports_key_values(self) -> bool:
-        """Whether this engine returns key-value pairs."""
-        ...
+    engine_name: str = "base"
+    engine_version: str = "0.0.0"
+    supports_tables: bool = False
+    supports_key_values: bool = False
 
     @abstractmethod
     async def extract_page(
@@ -53,25 +38,10 @@ class ExtractionEngine(ABC):
         image_path: Optional[str] = None,
         region_bbox: Optional[BBox] = None,
     ) -> NormalizedPageExtraction:
-        """
-        Extract text, lines, tables, and key-values from a single page.
-
-        Must return NormalizedPageExtraction with all invariants satisfied.
-        Must raise EngineError on failure (never return partial/corrupt data).
-        """
+        """Extract content from a single page."""
         ...
 
     @abstractmethod
     async def health_check(self) -> bool:
-        """Verify engine is available and responding."""
+        """Verify engine is available."""
         ...
-
-
-class EngineError(Exception):
-    """Raised when an extraction engine fails."""
-
-    def __init__(self, engine_name: str, error_code: str, message: str):
-        self.engine_name = engine_name
-        self.error_code = error_code
-        self.message = message
-        super().__init__(f"[{engine_name}] {error_code}: {message}")
