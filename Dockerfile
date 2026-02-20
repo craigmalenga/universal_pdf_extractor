@@ -1,3 +1,4 @@
+v2
 FROM python:3.12-slim
 
 # Install system dependencies for PDF processing and OCR
