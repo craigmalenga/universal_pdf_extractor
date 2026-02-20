@@ -199,7 +199,7 @@ async def process_all_queued(
         doc_id_str = str(doc.doc_id)
         if doc_id_str not in seen_ids:
             seen_ids.add(doc_id_str)
-            doc.status = "PROCESSING"
+            doc.status = "RENDERING"
             unique_docs.append(doc)
     await session.commit()
 
