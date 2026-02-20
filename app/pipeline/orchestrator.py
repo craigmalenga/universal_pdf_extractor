@@ -84,6 +84,7 @@ class DocumentPipeline:
                 # ── Cleanup old attempts ──
                 from sqlalchemy import delete
                 doc_uuid = uuid.UUID(doc_id)
+                # Delete in FK order: evidence → transactions → detected_tables → pages → segments → runs
                 await session.execute(
                     delete(Transaction).where(Transaction.doc_id == doc_uuid)
                 )
@@ -99,7 +100,7 @@ class DocumentPipeline:
                 await session.execute(
                     delete(ExtractionRun).where(ExtractionRun.doc_id == doc_uuid)
                 )
-                await session.flush()
+                await session.commit()
 
                 # ── Stage 1: LOAD ──
                 await self._update_status(session, doc_id, "RENDERING")
@@ -810,6 +811,7 @@ class DocumentPipeline:
         tx_records = []
 
         for flavor in ["stream", "lattice"]:
+            parsed_rows = []
             try:
                 tables = camelot.read_pdf(
                     pdf_path, pages=page_range, flavor=flavor, suppress_stdout=True
@@ -882,36 +884,53 @@ class DocumentPipeline:
                         if is_balance_marker(desc):
                             continue
 
-                        tx_rec = Transaction(
-                            doc_id=uuid.UUID(doc_id),
-                            run_id=uuid.UUID(run_id),
-                            segment_id=segment.segment_id,
-                            row_index=len(tx_records),
-                            posted_date=date_val,
-                            description_raw=desc[:500].replace("\n", " ") if desc else "",
-                            description_clean=(desc[:500].replace("\n", " ") if desc else "").strip(),
-                            amount=amount,
-                            direction=direction,
-                            direction_source=f"camelot_{flavor}",
-                            running_balance=balance,
-                            balance_confirmed=False,
-                            page_index=segment.start_page,
-                            confidence_overall=Decimal("0.75"),
-                            confidence_amount=Decimal("0.75"),
-                            confidence_date=Decimal("0.75") if date_val else Decimal("0.30"),
-                            confidence_direction=Decimal("0.85") if direction != "UNKNOWN" else Decimal("0.40"),
-                        )
-                        session.add(tx_rec)
-                        tx_records.append(tx_rec)
+                        parsed_rows.append({
+                            "date_val": date_val,
+                            "desc": desc[:500].replace("\n", " ") if desc else "",
+                            "amount": amount,
+                            "direction": direction,
+                            "balance": balance,
+                            "flavor": flavor,
+                        })
 
-                if tx_records:
-                    await session.flush()
-                    logger.info("camelot_fallback_success", flavor=flavor, transactions=len(tx_records))
-                    return tx_records
+                if parsed_rows:
+                    logger.info("camelot_fallback_success", flavor=flavor, rows=len(parsed_rows))
+                    break  # Use first successful flavor
 
             except Exception as e:
                 logger.warning("camelot_fallback_error", flavor=flavor, error=str(e))
+                parsed_rows = []
                 continue
+
+        if not parsed_rows:
+            return tx_records
+
+        # Now persist — session is clean at this point
+        for idx, pr in enumerate(parsed_rows):
+            tx_rec = Transaction(
+                doc_id=uuid.UUID(doc_id),
+                run_id=uuid.UUID(run_id),
+                segment_id=segment.segment_id,
+                row_index=idx,
+                posted_date=pr["date_val"],
+                description_raw=pr["desc"],
+                description_clean=pr["desc"].strip(),
+                amount=pr["amount"],
+                direction=pr["direction"],
+                direction_source=f"camelot_{pr['flavor']}",
+                running_balance=pr["balance"],
+                balance_confirmed=False,
+                page_index=segment.start_page,
+                confidence_overall=Decimal("0.75"),
+                confidence_amount=Decimal("0.75"),
+                confidence_date=Decimal("0.75") if pr["date_val"] else Decimal("0.30"),
+                confidence_direction=Decimal("0.85") if pr["direction"] != "UNKNOWN" else Decimal("0.40"),
+            )
+            session.add(tx_rec)
+            tx_records.append(tx_rec)
+
+        await session.flush()
+        logger.info("camelot_fallback_persisted", transactions=len(tx_records))
 
         return tx_records
 
