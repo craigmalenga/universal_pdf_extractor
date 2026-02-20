@@ -209,19 +209,19 @@ async function refreshData() {
   const health = await api('/health');
   state.apiConnected = health && health.status !== undefined;
 
-  const docs = await api('/api/v1/documents');
-  if (docs && Array.isArray(docs)) {
-    state.documents = docs;
+  const resp = await api('/api/v1/documents');
+  if (resp && resp.documents && Array.isArray(resp.documents)) {
+    state.documents = resp.documents;
+    const docs = resp.documents;
     // Compute stats from real data
-    state.stats.total = docs.length;
+    state.stats.total = resp.total || docs.length;
     state.stats.today = docs.filter(d => {
       const dt = new Date(d.created_at);
       const now = new Date();
       return dt.toDateString() === now.toDateString();
     }).length;
     state.stats.review = docs.filter(d => d.status === 'NEEDS_REVIEW').length;
-    const withConf = docs.filter(d => d.confidence_document != null);
-    state.stats.avgConf = withConf.length ? withConf.reduce((s, d) => s + d.confidence_document, 0) / withConf.length : 0;
+    state.stats.avgConf = 0;
     state.stats.queue = docs.filter(d => ['QUEUED', 'RENDERING', 'PREPROCESSING', 'EXTRACTING', 'SEGMENTING', 'VALIDATING'].includes(d.status)).length;
   }
 
@@ -241,10 +241,17 @@ async function uploadFile() {
     if (r.ok) {
       state.showUpload = false;
       state.uploadFile = null;
+      state.uploading = false;
       await refreshData();
+      return;
+    } else {
+      const err = await r.text();
+      console.error('Upload error:', r.status, err);
+      alert('Upload failed: ' + r.status);
     }
   } catch (e) {
     console.error('Upload failed:', e);
+    alert('Upload failed: ' + e.message);
   }
   state.uploading = false;
   render();
