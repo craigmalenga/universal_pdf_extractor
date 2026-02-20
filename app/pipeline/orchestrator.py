@@ -761,9 +761,9 @@ class DocumentPipeline:
                          segment=segment.segment_index, error=str(e))
 
         if not parsed_rows:
-            # Try Camelot as final fallback
-            logger.info("trying_camelot_fallback", segment=segment.segment_index)
-            return await self._analyse_segment_camelot_fallback(
+            # Try Tabula next
+            logger.info("trying_tabula_fallback", segment=segment.segment_index)
+            return await self._analyse_segment_tabula_fallback(
                 session, doc_id, run_id, segment
             )
 
@@ -801,8 +801,188 @@ class DocumentPipeline:
                          segment=segment.segment_index, error=str(e))
             tx_records = []
             # Savepoint rolled back automatically, session is clean
-            # Try Camelot as final fallback
-            logger.info("trying_camelot_fallback_after_persist_fail", segment=segment.segment_index)
+            logger.info("trying_tabula_fallback_after_persist_fail", segment=segment.segment_index)
+            return await self._analyse_segment_tabula_fallback(
+                session, doc_id, run_id, segment
+            )
+
+        return tx_records
+
+    # ─── Fallback: Tabula table extraction ────────────────────
+
+    async def _analyse_segment_tabula_fallback(
+        self,
+        session: AsyncSession,
+        doc_id: str,
+        run_id: str,
+        segment: DocumentSegment,
+    ) -> list[Transaction]:
+        """
+        Tabula fallback: uses Java-based PDF table extraction.
+        Often better than Camelot for borderless bank statement tables.
+        Falls through to Camelot if it fails.
+        """
+        try:
+            import tabula
+        except ImportError:
+            logger.warning("tabula_not_installed")
+            return await self._analyse_segment_camelot_fallback(
+                session, doc_id, run_id, segment
+            )
+
+        doc = await self._load_document(session, doc_id)
+        pdf_path = self._get_pdf_path(doc)
+        pages = f"{segment.start_page + 1}-{segment.end_page + 1}"
+
+        parsed_rows = []
+
+        for method in ["stream", "lattice"]:
+            try:
+                dfs = tabula.read_pdf(
+                    pdf_path,
+                    pages=pages,
+                    multiple_tables=True,
+                    stream=(method == "stream"),
+                    lattice=(method == "lattice"),
+                    silent=True,
+                )
+
+                if not dfs:
+                    continue
+
+                col_map = {}
+                header_found = False
+
+                for df in dfs:
+                    if df.empty or df.shape[1] < 2:
+                        continue
+
+                    # Check if column names are the header
+                    header = [str(c).lower().strip() for c in df.columns]
+                    col_map = self._map_table_columns(header)
+                    if col_map.get("amount_cols"):
+                        header_found = True
+                        logger.info("tabula_header_found", method=method, col_map=col_map)
+                    else:
+                        # Try first row as header
+                        if df.shape[0] > 1:
+                            first_row = [str(df.iloc[0, ci]).lower().strip() for ci in range(df.shape[1])]
+                            col_map = self._map_table_columns(first_row)
+                            if col_map.get("amount_cols"):
+                                header_found = True
+                                df = df.iloc[1:]  # Skip header row
+                                logger.info("tabula_header_found_row1", method=method, col_map=col_map)
+
+                    if not header_found or not col_map.get("amount_cols"):
+                        continue
+
+                    last_date = None
+                    for ri in range(df.shape[0]):
+                        cells = [str(df.iloc[ri, ci]).strip() if str(df.iloc[ri, ci]) != "nan" else ""
+                                 for ci in range(df.shape[1])]
+                        row_lower = " ".join(cells).lower()
+
+                        if any(kw in row_lower for kw in ["brought forward", "carried forward", "b/f", "c/f"]):
+                            continue
+
+                        date_val = None
+                        if col_map.get("date_col") is not None and col_map["date_col"] < len(cells):
+                            raw_date = cells[col_map["date_col"]]
+                            if raw_date:
+                                date_val = parse_date_uk(raw_date)
+                                if date_val:
+                                    last_date = date_val
+                            if not date_val and last_date:
+                                date_val = last_date
+
+                        desc = ""
+                        if col_map.get("desc_col") is not None and col_map["desc_col"] < len(cells):
+                            desc = cells[col_map["desc_col"]]
+
+                        amount = None
+                        direction = "UNKNOWN"
+                        balance = None
+
+                        for ac in col_map.get("amount_cols", []):
+                            idx, role = ac["index"], ac["role"]
+                            if idx < len(cells) and cells[idx]:
+                                amt_result = parse_amount_uk(cells[idx])
+                                if amt_result.amount is not None:
+                                    if role == "paid_in":
+                                        amount = abs(amt_result.amount)
+                                        direction = "CREDIT"
+                                    elif role == "withdrawn":
+                                        amount = abs(amt_result.amount)
+                                        direction = "DEBIT"
+                                    elif role == "balance":
+                                        balance = amt_result.amount
+                                    elif role == "amount" and amount is None:
+                                        amount = abs(amt_result.amount)
+
+                        if amount is None and balance is None:
+                            continue
+
+                        from app.pipeline.table_extractor import is_balance_marker
+                        if is_balance_marker(desc):
+                            continue
+
+                        parsed_rows.append({
+                            "date_val": date_val,
+                            "desc": desc[:500].replace("\n", " ") if desc else "",
+                            "amount": amount,
+                            "direction": direction,
+                            "balance": balance,
+                            "method": method,
+                        })
+
+                if parsed_rows:
+                    logger.info("tabula_parse_success", method=method, rows=len(parsed_rows))
+                    break
+
+            except Exception as e:
+                logger.warning("tabula_fallback_error", method=method, error=str(e))
+                parsed_rows = []
+                continue
+
+        if not parsed_rows:
+            # Fall through to Camelot
+            logger.info("trying_camelot_fallback", segment=segment.segment_index)
+            return await self._analyse_segment_camelot_fallback(
+                session, doc_id, run_id, segment
+            )
+
+        # Persist using savepoint
+        tx_records = []
+        try:
+            async with session.begin_nested():
+                for idx, pr in enumerate(parsed_rows):
+                    tx_rec = Transaction(
+                        doc_id=uuid.UUID(doc_id),
+                        run_id=uuid.UUID(run_id),
+                        segment_id=segment.segment_id,
+                        row_index=idx,
+                        posted_date=pr["date_val"],
+                        description_raw=pr["desc"],
+                        description_clean=pr["desc"].strip(),
+                        amount=pr["amount"],
+                        direction=pr["direction"],
+                        direction_source=f"tabula_{pr['method']}",
+                        running_balance=pr["balance"],
+                        balance_confirmed=False,
+                        page_index=segment.start_page,
+                        confidence_overall=Decimal("0.82"),
+                        confidence_amount=Decimal("0.82"),
+                        confidence_date=Decimal("0.82") if pr["date_val"] else Decimal("0.30"),
+                        confidence_direction=Decimal("0.90") if pr["direction"] != "UNKNOWN" else Decimal("0.40"),
+                    )
+                    session.add(tx_rec)
+                    tx_records.append(tx_rec)
+            logger.info("tabula_fallback_persisted", transactions=len(tx_records))
+
+        except Exception as e:
+            logger.error("tabula_fallback_persist_failed", error=str(e))
+            tx_records = []
+            # Fall through to Camelot
             return await self._analyse_segment_camelot_fallback(
                 session, doc_id, run_id, segment
             )
