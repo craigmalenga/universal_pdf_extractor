@@ -64,6 +64,7 @@ class DocumentPipeline:
     Processes a single document through all 8 stages.
     """
 
+
     def __init__(self):
         self.pdfplumber = PdfPlumberEngine()
         self.tesseract = TesseractEngine()
