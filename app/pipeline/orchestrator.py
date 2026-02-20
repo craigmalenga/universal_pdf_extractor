@@ -67,7 +67,7 @@ class DocumentPipeline:
     def __init__(self):
         self.pdfplumber = PdfPlumberEngine()
         self.tesseract = TesseractEngine()
-        self.store = ArtifactStore(root_dir=settings.ARTIFACT_ROOT)
+        self.store = ArtifactStore(root=settings.ARTIFACT_ROOT)
 
     async def process(self, doc_id: str) -> dict:
         """
