@@ -58,6 +58,31 @@ BALANCE_MARKER_PATTERNS = [
     r"statement\s+continued",
 ]
 
+# Patterns for summary/header rows that should NOT be treated as transactions
+SUMMARY_ROW_PATTERNS = [
+    r"personal\s+account\s*(balance|statement)",
+    r"(total|net)\s+(balance|outgoings|deposits|income|payments|in|out)",
+    r"balance\s+in\s+pots?",
+    r"(including|excluding)\s+(all\s+)?pots?",
+    r"(regular|savings)\s+pots?\s+(with|provided)",
+    r"sort\s*code",
+    r"account\s*number",
+    r"\biban\b",
+    r"\bbic\b",
+    r"\bswift\b",
+    r"statement\s+period",
+    r"(from|to)\s+\d{1,2}[\/\-]\d{1,2}[\/\-]\d{2,4}",
+    r"(financial\s+services|compensation\s+scheme|fscs)",
+    r"(authorised|regulated)\s+by",
+    r"registered\s+(office|in\s+england)",
+    r"company\s+(registered|number|no)",
+    r"monzo\s+bank\s+limited",
+    r"pot\s+(type|name|balance|statement)",
+    r"this\s+pot\s+was\s+(closed|opened)",
+    r"(important\s+information|compensation\s+arrangements)",
+    r"(page|sheet)\s+\d+\s+(of|/)\s+\d+",
+]
+
 
 def is_balance_marker(text: str) -> bool:
     """Detect carried/brought forward balance markers."""
@@ -65,15 +90,28 @@ def is_balance_marker(text: str) -> bool:
     return any(re.search(p, text_lower) for p in BALANCE_MARKER_PATTERNS)
 
 
+def is_summary_row(text: str) -> bool:
+    """Detect summary/header rows that should not be treated as transactions."""
+    text_lower = text.lower().strip()
+    if not text_lower:
+        return False
+    # Check balance markers first
+    if is_balance_marker(text_lower):
+        return True
+    # Check summary patterns
+    return any(re.search(p, text_lower) for p in SUMMARY_ROW_PATTERNS)
+
+
 # ─── Column Detection ────────────────────────────────────────
 
 def detect_columns(
     lines: list[ExtractedLine],
-    min_column_occupancy: float = 0.25,
-    n_bins: int = 100,
+    min_column_occupancy: float = 0.08,
+    n_bins: int = 120,
 ) -> list[ColumnRegion]:
     """
     Detect column boundaries from token x-coordinates using histogram analysis.
+    Uses a low occupancy threshold to catch sparse amount columns.
     Returns list of ColumnRegion sorted left-to-right.
     """
     if not lines:
@@ -95,12 +133,16 @@ def detect_columns(
 
     # Smooth to merge nearby peaks
     from scipy.ndimage import gaussian_filter1d
-    smoothed = gaussian_filter1d(hist.astype(float), sigma=2.0)
+    smoothed = gaussian_filter1d(hist.astype(float), sigma=1.5)
 
-    # Find peaks (column start positions)
-    threshold = len(lines) * min_column_occupancy
+    # Find peaks - use progressively lower thresholds
     from scipy.signal import find_peaks
-    peaks, _ = find_peaks(smoothed, height=threshold, distance=5)
+    peaks = []
+    for occupancy in [min_column_occupancy, 0.05, 0.03]:
+        threshold = max(len(lines) * occupancy, 2.0)
+        peaks, _ = find_peaks(smoothed, height=threshold, distance=4)
+        if len(peaks) >= 3:  # Bank statements need at least 3 columns (date, desc, amount)
+            break
 
     if len(peaks) == 0:
         # Fallback: single column spanning entire width
@@ -127,8 +169,8 @@ def detect_columns(
     if columns:
         columns[0].x_start = 0.0
 
-    logger.debug("columns_detected", count=len(columns),
-                 positions=[(c.x_start, c.x_end) for c in columns])
+    logger.info("columns_detected", count=len(columns),
+                positions=[(round(c.x_start, 3), round(c.x_end, 3)) for c in columns])
 
     return columns
 

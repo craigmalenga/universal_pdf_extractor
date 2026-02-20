@@ -715,10 +715,24 @@ class DocumentPipeline:
                         header = [str(c).lower().strip() if c else "" for c in table[0]]
                         col_map = self._map_table_columns(header)
 
-                        if not col_map.get("amount_cols"):
+                        # Require date column + at least one non-balance amount column
+                        has_valid_cols = (
+                            col_map.get("amount_cols")
+                            and col_map.get("date_col") is not None
+                            and any(ac["role"] != "balance" for ac in col_map["amount_cols"])
+                        )
+
+                        if not has_valid_cols:
                             if len(table) > 2:
                                 header = [str(c).lower().strip() if c else "" for c in table[1]]
                                 col_map = self._map_table_columns(header)
+                                has_valid_cols = (
+                                    col_map.get("amount_cols")
+                                    and col_map.get("date_col") is not None
+                                    and any(ac["role"] != "balance" for ac in col_map["amount_cols"])
+                                )
+                                if not has_valid_cols:
+                                    continue
                                 data_rows = table[2:]
                             else:
                                 continue
@@ -766,8 +780,10 @@ class DocumentPipeline:
                             if amount is None:  # Must have an actual amount
                                 continue
 
-                            from app.pipeline.table_extractor import is_balance_marker
-                            if is_balance_marker(desc):
+                            from app.pipeline.table_extractor import is_summary_row
+                            # Check both description and full row text
+                            full_row_text = " ".join(row_strs)
+                            if is_summary_row(desc) or is_summary_row(full_row_text):
                                 continue
 
                             parsed_rows.append({
@@ -876,6 +892,14 @@ class DocumentPipeline:
                 col_map = {}
                 header_found = False
 
+                def _valid_transaction_table(cm):
+                    """Require date column + at least one non-balance amount column."""
+                    return (
+                        cm.get("amount_cols")
+                        and cm.get("date_col") is not None
+                        and any(ac["role"] != "balance" for ac in cm["amount_cols"])
+                    )
+
                 for df in dfs:
                     if df.empty or df.shape[1] < 2:
                         continue
@@ -883,7 +907,7 @@ class DocumentPipeline:
                     # Check if column names are the header
                     header = [str(c).lower().strip() for c in df.columns]
                     col_map = self._map_table_columns(header)
-                    if col_map.get("amount_cols"):
+                    if _valid_transaction_table(col_map):
                         header_found = True
                         logger.info("tabula_header_found", method=method, col_map=col_map)
                     else:
@@ -891,12 +915,12 @@ class DocumentPipeline:
                         if df.shape[0] > 1:
                             first_row = [str(df.iloc[0, ci]).lower().strip() for ci in range(df.shape[1])]
                             col_map = self._map_table_columns(first_row)
-                            if col_map.get("amount_cols"):
+                            if _valid_transaction_table(col_map):
                                 header_found = True
                                 df = df.iloc[1:]  # Skip header row
                                 logger.info("tabula_header_found_row1", method=method, col_map=col_map)
 
-                    if not header_found or not col_map.get("amount_cols"):
+                    if not header_found or not _valid_transaction_table(col_map):
                         continue
 
                     last_date = None
@@ -945,8 +969,9 @@ class DocumentPipeline:
                         if amount is None:  # Must have an actual amount
                             continue
 
-                        from app.pipeline.table_extractor import is_balance_marker
-                        if is_balance_marker(desc):
+                        from app.pipeline.table_extractor import is_summary_row
+                        full_row_text = " ".join(cells)
+                        if is_summary_row(desc) or is_summary_row(full_row_text):
                             continue
 
                         parsed_rows.append({
@@ -1052,18 +1077,23 @@ class DocumentPipeline:
                         cells = [str(df.iloc[ri, ci]).strip() for ci in range(df.shape[1])]
                         row_lower = " ".join(cells).lower()
 
-                        # Detect header
-                        if not header_found and any(kw in row_lower for kw in
-                                ["date", "description", "paid in", "withdrawn",
-                                 "balance", "money in", "money out", "debit", "credit"]):
+                        # Detect header - require "date" keyword to avoid matching summary rows
+                        if not header_found and "date" in row_lower and any(kw in row_lower for kw in
+                                ["description", "paid in", "withdrawn",
+                                 "balance", "money in", "money out", "debit", "credit", "amount"]):
                             header = [c.lower() for c in cells]
                             col_map = self._map_table_columns(header)
-                            if col_map.get("amount_cols"):
+                            valid = (
+                                col_map.get("amount_cols")
+                                and col_map.get("date_col") is not None
+                                and any(ac["role"] != "balance" for ac in col_map["amount_cols"])
+                            )
+                            if valid:
                                 header_found = True
                                 logger.info("camelot_header_found", flavor=flavor, col_map=col_map)
                             continue
 
-                        if not header_found or not col_map.get("amount_cols"):
+                        if not header_found:
                             continue
 
                         if any(kw in row_lower for kw in ["brought forward", "carried forward", "b/f", "c/f"]):
@@ -1104,8 +1134,9 @@ class DocumentPipeline:
                         if amount is None:  # Must have an actual amount
                             continue
 
-                        from app.pipeline.table_extractor import is_balance_marker
-                        if is_balance_marker(desc):
+                        from app.pipeline.table_extractor import is_summary_row
+                        full_row_text = " ".join(cells)
+                        if is_summary_row(desc) or is_summary_row(full_row_text):
                             continue
 
                         parsed_rows.append({
