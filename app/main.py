@@ -85,6 +85,52 @@ def create_app() -> FastAPI:
             "version": settings.APP_VERSION,
         })
 
+    # Direct process endpoint — bypasses router import chain issues
+    @app.post("/process/{doc_id}")
+    async def process_document_direct(doc_id: str):
+        """Process a single document inline. Bypasses worker."""
+        try:
+            from app.pipeline.orchestrator import DocumentPipeline
+        except Exception as e:
+            return {"error": f"Import failed: {e}"}
+        try:
+            pipeline = DocumentPipeline()
+            result = await pipeline.process(doc_id)
+            return result
+        except Exception as e:
+            import traceback
+            return {"error": str(e), "traceback": traceback.format_exc()}
+
+    @app.post("/process-all")
+    async def process_all_direct():
+        """Process all QUEUED documents inline."""
+        from app.models.database import async_session_factory
+        from sqlalchemy import select as sa_select
+        from app.models.tables import Document as DocModel
+        try:
+            from app.pipeline.orchestrator import DocumentPipeline
+        except Exception as e:
+            return {"error": f"Import failed: {e}"}
+
+        async with async_session_factory() as session:
+            result = await session.execute(
+                sa_select(DocModel).where(DocModel.status == "QUEUED")
+            )
+            docs = result.scalars().all()
+
+        if not docs:
+            return {"message": "No queued documents", "processed": 0}
+
+        pipeline = DocumentPipeline()
+        results = []
+        for doc in docs:
+            try:
+                output = await pipeline.process(str(doc.doc_id))
+                results.append({"doc_id": str(doc.doc_id), "status": output.get("status")})
+            except Exception as e:
+                results.append({"doc_id": str(doc.doc_id), "error": str(e)})
+        return {"processed": len(results), "results": results}
+
     return app
 
 
