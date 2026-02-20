@@ -135,20 +135,20 @@ HEADER_MAP = {
 
 
 def _match_header(header_text: str) -> Optional[ColumnRole]:
-    """Match a header text to a column role. Strips currency prefixes first."""
+    """Match a header text to a column role."""
     h = header_text.lower().strip()
     if not h:
         return None
 
-    # Strip currency prefixes: "(GBP) Amount" -> "amount", "(gbp) balance" -> "balance"
-    h = re.sub(r'\(\s*(?:gbp|eur|usd|currency)\s*\)\s*', '', h, flags=re.IGNORECASE).strip()
-    # Also strip standalone currency prefix without parens: "GBP Amount" -> "amount"
-    h = re.sub(r'^(?:gbp|eur|usd)\s+', '', h, flags=re.IGNORECASE).strip()
+    # Strip currency prefixes: (GBP), (gbp), (EUR), etc.
+    h = re.sub(r'\([a-z]{3}\)\s*', '', h).strip()
+    # Strip currency symbols
+    h = re.sub(r'[£$€]\s*', '', h).strip()
 
     if not h:
         return None
 
-    # Check most specific multi-word matches first
+    # Check most specific first
     if "value" in h and "date" in h:
         return ColumnRole.VALUE_DATE
     if "paid out" in h or "money out" in h:
@@ -254,6 +254,23 @@ def assign_column_roles(
         if unknown_cols:
             widest = max(unknown_cols, key=lambda x: x[1].x_end - x[1].x_start)
             roles[widest[0]] = ColumnRole.DESCRIPTION
+
+    # ── PASS 4: Merge UNKNOWN columns between DATE and amounts into DESCRIPTION ──
+    # Find position boundaries: DATE is typically leftmost, amounts are right
+    date_cols = [i for i, r in roles.items() if r == ColumnRole.DATE]
+    amount_cols = [i for i, r in roles.items() if r in (
+        ColumnRole.DEBIT, ColumnRole.CREDIT, ColumnRole.SINGLE_AMOUNT, ColumnRole.BALANCE)]
+
+    if date_cols and amount_cols:
+        date_max_pos = max(columns[i].x_end for i in date_cols if i < len(columns))
+        amount_min_pos = min(columns[i].x_start for i in amount_cols if i < len(columns))
+
+        # Any UNKNOWN column between DATE and amounts is description text
+        for i in sorted(roles.keys()):
+            if roles[i] == ColumnRole.UNKNOWN and i < len(columns):
+                col_mid = (columns[i].x_start + columns[i].x_end) / 2
+                if date_max_pos <= col_mid <= amount_min_pos:
+                    roles[i] = ColumnRole.DESCRIPTION
 
     # Update column objects
     for i, role in roles.items():

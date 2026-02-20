@@ -6,6 +6,7 @@ Stages: LOAD → RENDER → PREPROCESS → EXTRACT → SEGMENT → ANALYSE → V
 """
 
 import os
+import re
 import time
 import uuid
 import tempfile
@@ -615,10 +616,10 @@ class DocumentPipeline:
 
             if role == ColumnRole.DATE:
                 result["raw_date"] = text
-                parsed = parse_date_uk(text)
-                if parsed:
-                    result["parsed_date"] = parsed
-                    result["date_confidence"] = 0.9
+                date_result = parse_date_uk(text)
+                if date_result and date_result.parsed_date:
+                    result["parsed_date"] = date_result.parsed_date
+                    result["date_confidence"] = date_result.confidence
 
             elif role == ColumnRole.DESCRIPTION:
                 result["description"] = (result["description"] + " " + text).strip()
@@ -651,6 +652,7 @@ class DocumentPipeline:
                     amt_result = parse_amount_uk(text)
                     if amt_result.amount is not None:
                         result["parsed_amount"] = abs(amt_result.amount)
+                        # Infer direction from sign: negative = DEBIT, positive = CREDIT
                         if amt_result.amount < 0:
                             result["direction"] = "DEBIT"
                             result["direction_source"] = "sign_negative"
@@ -662,7 +664,7 @@ class DocumentPipeline:
                         else:
                             result["direction"] = "UNKNOWN"
                             result["direction_source"] = "single_amount_zero"
-                            result["direction_confidence"] = 0.5
+                            result["direction_confidence"] = 0.50
                         result["amount_confidence"] = amt_result.confidence
 
             elif role == ColumnRole.BALANCE:
@@ -757,8 +759,9 @@ class DocumentPipeline:
                             if col_map.get("date_col") is not None:
                                 raw_date = row_strs[col_map["date_col"]]
                                 if raw_date:
-                                    date_val = parse_date_uk(raw_date)
-                                    if date_val:
+                                    date_result = parse_date_uk(raw_date)
+                                    if date_result and date_result.parsed_date:
+                                        date_val = date_result.parsed_date
                                         last_date = date_val
                                 elif last_date:
                                     date_val = last_date
@@ -786,6 +789,11 @@ class DocumentPipeline:
                                             balance = amt_result.amount
                                         elif role == "amount" and amount is None:
                                             amount = abs(amt_result.amount)
+                                            # Infer direction from sign
+                                            if amt_result.amount < 0:
+                                                direction = "DEBIT"
+                                            elif amt_result.amount > 0:
+                                                direction = "CREDIT"
 
                             if amount is None:  # Must have an actual amount
                                 continue
@@ -946,8 +954,9 @@ class DocumentPipeline:
                         if col_map.get("date_col") is not None and col_map["date_col"] < len(cells):
                             raw_date = cells[col_map["date_col"]]
                             if raw_date:
-                                date_val = parse_date_uk(raw_date)
-                                if date_val:
+                                date_result = parse_date_uk(raw_date)
+                                if date_result and date_result.parsed_date:
+                                    date_val = date_result.parsed_date
                                     last_date = date_val
                             if not date_val and last_date:
                                 date_val = last_date
@@ -975,6 +984,10 @@ class DocumentPipeline:
                                         balance = amt_result.amount
                                     elif role == "amount" and amount is None:
                                         amount = abs(amt_result.amount)
+                                        if amt_result.amount < 0:
+                                            direction = "DEBIT"
+                                        elif amt_result.amount > 0:
+                                            direction = "CREDIT"
 
                         if amount is None:  # Must have an actual amount
                             continue
@@ -1115,7 +1128,9 @@ class DocumentPipeline:
                         if col_map.get("date_col") is not None and col_map["date_col"] < len(row_strs):
                             raw_date = row_strs[col_map["date_col"]]
                             if raw_date:
-                                date_val = parse_date_uk(raw_date)
+                                date_result = parse_date_uk(raw_date)
+                                if date_result and date_result.parsed_date:
+                                    date_val = date_result.parsed_date
 
                         desc = ""
                         if col_map.get("desc_col") is not None and col_map["desc_col"] < len(row_strs):
@@ -1140,6 +1155,10 @@ class DocumentPipeline:
                                         balance = amt_result.amount
                                     elif role == "amount" and amount is None:
                                         amount = abs(amt_result.amount)
+                                        if amt_result.amount < 0:
+                                            direction = "DEBIT"
+                                        elif amt_result.amount > 0:
+                                            direction = "CREDIT"
 
                         if amount is None:  # Must have an actual amount
                             continue
@@ -1202,41 +1221,12 @@ class DocumentPipeline:
 
         return tx_records
 
-
-    def _passes_quality_gate(self, tx_data: dict) -> bool:
-        """
-        Quality gate: filter out garbage/summary rows before persistence.
-        Returns True if the row should be kept, False to discard.
-        """
-        has_amount = tx_data.get("parsed_amount") is not None
-        has_description = bool(tx_data.get("description", "").strip())
-
-        # Must have an amount (balance-only rows are summary leakage)
-        if not has_amount:
-            return False
-
-        # Check for summary/header row text
-        desc = tx_data.get("description", "").lower()
-        summary_keywords = [
-            "total balance", "total outgoings", "total deposits",
-            "balance in pots", "personal account balance",
-            "including all pots", "excluding all pots",
-            "brought forward", "carried forward",
-            "total withdrawn", "total paid in",
-            "opening balance", "closing balance",
-            "balance brought", "balance carried",
-        ]
-        if any(kw in desc for kw in summary_keywords):
-            return False
-
-        return True
-
-
     def _map_table_columns(self, header: list[str]) -> dict:
         """Map header row to column roles for pdfplumber fallback."""
+        import re as _re
         result = {"date_col": None, "desc_col": None, "amount_cols": []}
 
-        date_kw = ["date"]
+        date_kw = ["date", "posted dte"]
         desc_kw = ["description", "details", "particulars", "narrative", "transaction"]
         paid_in_kw = ["paid in", "credit", "money in", "deposit", "receipts"]
         withdrawn_kw = ["withdrawn", "debit", "money out", "paid out", "withdrawal", "payments"]
@@ -1247,11 +1237,9 @@ class DocumentPipeline:
             h_lower = h.lower().strip()
             if not h_lower:
                 continue
-
-            # Strip currency prefixes like "(GBP)"
-            h_lower = re.sub(r'\(\s*(?:gbp|eur|usd|currency)\s*\)\s*', '', h_lower).strip()
-            h_lower = re.sub(r'^(?:gbp|eur|usd)\s+', '', h_lower).strip()
-
+            # Strip currency prefixes: (GBP), (gbp), (EUR), etc.
+            h_lower = _re.sub(r'\([a-z]{3}\)\s*', '', h_lower).strip()
+            h_lower = _re.sub(r'[£$€]\s*', '', h_lower).strip()
             if not h_lower:
                 continue
 
