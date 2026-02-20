@@ -81,6 +81,26 @@ class DocumentPipeline:
 
         async with async_session_factory() as session:
             try:
+                # ── Cleanup old attempts ──
+                from sqlalchemy import delete
+                doc_uuid = uuid.UUID(doc_id)
+                await session.execute(
+                    delete(Transaction).where(Transaction.doc_id == doc_uuid)
+                )
+                await session.execute(
+                    delete(DetectedTable).where(DetectedTable.doc_id == doc_uuid)
+                )
+                await session.execute(
+                    delete(Page).where(Page.doc_id == doc_uuid)
+                )
+                await session.execute(
+                    delete(DocumentSegment).where(DocumentSegment.doc_id == doc_uuid)
+                )
+                await session.execute(
+                    delete(ExtractionRun).where(ExtractionRun.doc_id == doc_uuid)
+                )
+                await session.flush()
+
                 # ── Stage 1: LOAD ──
                 await self._update_status(session, doc_id, "RENDERING")
                 doc = await self._load_document(session, doc_id)
@@ -227,10 +247,20 @@ class DocumentPipeline:
                 # ── Stage 7: VALIDATE ──
                 await self._update_status(session, doc_id, "VALIDATING")
                 recon_rate = total_balance_confirmed / len(all_transactions) if all_transactions else 0.0
-                confidence = score_document(
-                    transactions=all_transactions,
-                    reconciliation_rate=recon_rate,
-                )
+
+                # Convert ORM Transaction objects to dicts for scoring
+                tx_dicts = []
+                for tx_obj in all_transactions:
+                    tx_dicts.append({
+                        "confidence_amount": float(tx_obj.confidence_amount) if tx_obj.confidence_amount else 0.0,
+                        "confidence_direction": float(tx_obj.confidence_direction) if tx_obj.confidence_direction else 0.0,
+                        "confidence_date": float(tx_obj.confidence_date) if tx_obj.confidence_date else 0.0,
+                        "confidence_balance": 0.8 if tx_obj.balance_confirmed else 0.0,
+                        "balance_confirmed": tx_obj.balance_confirmed or False,
+                    })
+
+                score_result = score_document(transactions=tx_dicts)
+                confidence = score_result.document_confidence
 
                 # Determine final status
                 if confidence >= settings.CONFIDENCE_PASS_THRESHOLD:
@@ -390,6 +420,11 @@ class DocumentPipeline:
         amount_cols = [i for i, r in roles.items()
                        if r in (ColumnRole.DEBIT, ColumnRole.CREDIT, ColumnRole.SINGLE_AMOUNT, ColumnRole.BALANCE)]
 
+        if not amount_cols:
+            logger.warning("no_amount_columns", segment=segment.segment_index,
+                           columns=len(columns), roles={i: r.value for i, r in roles.items()})
+            return [], 0
+
         # Reconstruct rows with proper column knowledge
         rows = reconstruct_rows(all_lines, columns, date_col, amount_cols)
         transaction_rows = [r for r in rows if not r.is_balance_marker]
@@ -406,7 +441,37 @@ class DocumentPipeline:
             raw_transactions.append(tx_data)
 
         # Run balance solver for direction inference
-        solved = solve_directions(raw_transactions)
+        # Build column_roles dict for solver
+        role_map = {i: r.value for i, r in roles.items()}
+
+        # Find opening/closing balance from balance markers
+        opening_balance = None
+        closing_balance = None
+        balance_markers = [r for r in rows if r.is_balance_marker]
+        for bm in balance_markers:
+            for cell in bm.cells:
+                role = roles.get(cell.column_index)
+                if role == ColumnRole.BALANCE and cell.text.strip():
+                    bal_result = parse_amount_uk(cell.text.strip())
+                    if bal_result.amount is not None:
+                        # First marker is opening, last is closing
+                        if opening_balance is None:
+                            opening_balance = bal_result.amount
+                        closing_balance = bal_result.amount
+
+        solver_results = solve_directions(raw_transactions, opening_balance, closing_balance, role_map)
+
+        # Merge solver results back into raw_transactions
+        for i, sr in enumerate(solver_results):
+            if i < len(raw_transactions):
+                tx = raw_transactions[i]
+                if tx["direction"] == "UNKNOWN" and sr.direction != "UNKNOWN":
+                    tx["direction"] = sr.direction
+                    tx["direction_source"] = sr.direction_source
+                    tx["direction_confidence"] = sr.confidence
+                tx["balance_confirmed"] = sr.balance_confirmed
+
+        solved = raw_transactions
 
         # Persist transactions
         tx_records = []
@@ -522,41 +587,40 @@ class DocumentPipeline:
             elif role == ColumnRole.DEBIT:
                 if text:
                     result["raw_debit"] = text
-                    amt = parse_amount_uk(text)
-                    if amt is not None:
-                        result["parsed_amount"] = abs(amt)
+                    amt_result = parse_amount_uk(text)
+                    if amt_result.amount is not None:
+                        result["parsed_amount"] = abs(amt_result.amount)
                         result["direction"] = "DEBIT"
                         result["direction_source"] = "column_debit"
                         result["direction_confidence"] = 0.95
-                        result["amount_confidence"] = 0.9
+                        result["amount_confidence"] = amt_result.confidence
 
             elif role == ColumnRole.CREDIT:
                 if text:
                     result["raw_credit"] = text
-                    amt = parse_amount_uk(text)
-                    if amt is not None:
-                        result["parsed_amount"] = abs(amt)
+                    amt_result = parse_amount_uk(text)
+                    if amt_result.amount is not None:
+                        result["parsed_amount"] = abs(amt_result.amount)
                         result["direction"] = "CREDIT"
                         result["direction_source"] = "column_credit"
                         result["direction_confidence"] = 0.95
-                        result["amount_confidence"] = 0.9
+                        result["amount_confidence"] = amt_result.confidence
 
             elif role == ColumnRole.SINGLE_AMOUNT:
                 if text:
                     result["raw_amount"] = text
-                    amt = parse_amount_uk(text)
-                    if amt is not None:
-                        result["parsed_amount"] = abs(amt)
-                        # Direction unknown from single amount — balance solver decides
+                    amt_result = parse_amount_uk(text)
+                    if amt_result.amount is not None:
+                        result["parsed_amount"] = abs(amt_result.amount)
                         result["direction"] = "UNKNOWN"
                         result["direction_source"] = "single_amount"
-                        result["amount_confidence"] = 0.9
+                        result["amount_confidence"] = amt_result.confidence
 
             elif role == ColumnRole.BALANCE:
                 if text:
                     result["raw_balance"] = text
-                    bal = parse_amount_uk(text)
-                    if bal is not None:
-                        result["parsed_balance"] = bal
+                    bal_result = parse_amount_uk(text)
+                    if bal_result.amount is not None:
+                        result["parsed_balance"] = bal_result.amount
 
         return result
