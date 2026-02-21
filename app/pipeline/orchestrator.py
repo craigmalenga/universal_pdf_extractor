@@ -51,6 +51,101 @@ from app.schemas.contracts import NormalizedPageExtraction
 logger = structlog.get_logger(__name__)
 
 
+# ─── Customer Info Extraction ──────────────────────────────
+# UK postcode regex: covers A9 9AA, A99 9AA, A9A 9AA, AA9 9AA, AA99 9AA, AA9A 9AA
+_UK_POSTCODE_RE = re.compile(
+    r'\b([A-Z]{1,2}\d[A-Z\d]?\s*\d[A-Z]{2})\b',
+    re.IGNORECASE,
+)
+
+# Title prefixes that signal a person's name
+_NAME_PREFIXES = re.compile(
+    r'^(Mr\.?|Mrs\.?|Ms\.?|Miss|Dr\.?|Prof\.?|Sir|Lady)\s+',
+    re.IGNORECASE,
+)
+
+# Lines that are clearly bank/statement boilerplate, not customer info
+_BOILERPLATE_RE = re.compile(
+    r'(statement|sort\s*code|account\s*number|account\s*no|'
+    r'iban|bic|page\s+\d|sheet\s+\d|branch|telephone|'
+    r'barclays|hsbc|lloyds|natwest|rbs|santander|halifax|'
+    r'nationwide|monzo|starling|revolut|tsb|metro\s+bank|'
+    r'co[\-\s]?operative|allied\s+irish|aib|bank\s+of\s+ireland|'
+    r'clydesdale|virgin\s+money|date\s*:)',
+    re.IGNORECASE,
+)
+
+
+def _extract_customer_info(all_text: str) -> dict:
+    """
+    Extract account holder name, address, and postcode from statement text.
+    Focuses on the first page (top ~40 lines) where customer info typically appears.
+
+    Returns dict with keys: account_holder_name, account_holder_address, account_holder_postcode
+    (any may be None).
+    """
+    result = {
+        "account_holder_name": None,
+        "account_holder_address": None,
+        "account_holder_postcode": None,
+    }
+
+    lines = all_text.split("\n")
+    # Focus on first ~50 lines (first page header area)
+    header_lines = lines[:50]
+
+    # 1) Find postcode
+    postcode = None
+    postcode_line_idx = None
+    for i, line in enumerate(header_lines):
+        m = _UK_POSTCODE_RE.search(line)
+        if m:
+            postcode = m.group(1).upper()
+            # Normalise spacing: ensure single space before last 3 chars
+            pc = postcode.replace(" ", "")
+            if len(pc) >= 5:
+                postcode = pc[:-3] + " " + pc[-3:]
+            postcode_line_idx = i
+            break
+
+    result["account_holder_postcode"] = postcode
+
+    if postcode_line_idx is None:
+        # No postcode found — try to find name via title prefix
+        for line in header_lines:
+            stripped = line.strip()
+            if _NAME_PREFIXES.match(stripped) and not _BOILERPLATE_RE.search(stripped):
+                result["account_holder_name"] = stripped
+                break
+        return result
+
+    # 2) Work backwards from postcode line to find the address block
+    # Address block = consecutive non-empty, non-boilerplate lines ending at postcode
+    block_end = postcode_line_idx
+    block_start = postcode_line_idx
+
+    for i in range(postcode_line_idx - 1, max(postcode_line_idx - 7, -1), -1):
+        stripped = header_lines[i].strip()
+        if not stripped:
+            break
+        if _BOILERPLATE_RE.search(stripped):
+            break
+        if len(stripped) > 80:
+            break  # Too long — likely a transaction or paragraph, not address
+        block_start = i
+
+    # Extract the block
+    block = [header_lines[i].strip() for i in range(block_start, block_end + 1) if header_lines[i].strip()]
+
+    if len(block) >= 1:
+        # First line = name (or name + first address line if only 2 lines)
+        result["account_holder_name"] = block[0]
+        if len(block) >= 2:
+            result["account_holder_address"] = ", ".join(block[1:])
+
+    return result
+
+
 class PipelineError(Exception):
     """Fatal pipeline error."""
     def __init__(self, message: str, error_code: str = "ERR_PIPELINE"):
@@ -229,6 +324,23 @@ class DocumentPipeline:
                 if provider_result.provider_name:
                     doc.provider_guess = provider_result.provider_name
                     doc.provider_confidence = Decimal(str(round(provider_result.confidence, 4)))
+
+                # Extract account holder info
+                try:
+                    customer_info = _extract_customer_info(all_text)
+                    if customer_info["account_holder_name"]:
+                        doc.account_holder_name = customer_info["account_holder_name"]
+                    if customer_info["account_holder_address"]:
+                        doc.account_holder_address = customer_info["account_holder_address"]
+                    if customer_info["account_holder_postcode"]:
+                        doc.account_holder_postcode = customer_info["account_holder_postcode"]
+                    logger.info("customer_info_extracted",
+                                doc_id=doc_id,
+                                name=customer_info["account_holder_name"],
+                                postcode=customer_info["account_holder_postcode"])
+                except Exception as cust_err:
+                    logger.warning("customer_info_extraction_failed",
+                                   doc_id=doc_id, error=str(cust_err))
 
                 await session.flush()
 

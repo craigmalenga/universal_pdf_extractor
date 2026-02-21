@@ -67,6 +67,9 @@ class Document(Base):
         Integer, nullable=False, default=5, server_default="5"
     )
     metadata_json: Mapped[Optional[dict]] = mapped_column(JSONB, nullable=True)
+    account_holder_name: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    account_holder_address: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    account_holder_postcode: Mapped[Optional[str]] = mapped_column(String(10), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=text("NOW()")
     )

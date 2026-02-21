@@ -287,7 +287,7 @@ async def export_all_transactions_xlsx(
     session: AsyncSession = Depends(get_db),
 ):
     """Export all transactions across all documents as a formatted Excel file."""
-    return await _build_xlsx_response(session, doc_ids=None, filename="all_transactions.xlsx")
+    return await _build_xlsx_response(session, doc_ids=None)
 
 
 @router.get("/export/batch-xlsx")
@@ -305,7 +305,7 @@ async def export_batch_transactions_xlsx(
     except ValueError:
         raise HTTPException(status_code=400, detail="Invalid document ID format")
 
-    return await _build_xlsx_response(session, doc_ids=uuid_list, filename="batch_transactions.xlsx")
+    return await _build_xlsx_response(session, doc_ids=uuid_list)
 
 
 @router.get("/{doc_id}", response_model=DocumentDetail)
@@ -545,8 +545,7 @@ async def export_transactions_xlsx(
     if not doc:
         raise HTTPException(status_code=404, detail="Document not found")
 
-    safe_name = (doc.file_name or "export").replace(".pdf", "").replace(" ", "_")
-    return await _build_xlsx_response(session, doc_ids=[doc_uuid], filename=f"{safe_name}_transactions.xlsx")
+    return await _build_xlsx_response(session, doc_ids=[doc_uuid])
 
 
 @router.post("/{doc_id}/process", status_code=status.HTTP_202_ACCEPTED)
@@ -586,121 +585,182 @@ async def process_document_now(
 async def _build_xlsx_response(
     session: AsyncSession,
     doc_ids: list | None,
-    filename: str,
+    filename: str | None = None,
 ):
-    """Build a formatted Excel file from transactions and return as streaming response."""
+    """Build a formatted Excel file from transactions with document metadata header."""
     import io
+    from datetime import datetime as dt, timezone
     from fastapi.responses import StreamingResponse
     from openpyxl import Workbook
-    from openpyxl.styles import Font, PatternFill, Alignment, Border, Side, numbers
+    from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
 
-    # Query transactions
-    query = (
-        select(Transaction, Document.file_name)
+    # ── Load document metadata ──
+    doc_query = select(Document)
+    if doc_ids is not None:
+        doc_query = doc_query.where(Document.doc_id.in_(doc_ids))
+    doc_result = await session.execute(doc_query.order_by(Document.file_name))
+    docs = doc_result.scalars().all()
+
+    if not docs:
+        raise HTTPException(status_code=404, detail="No documents found")
+
+    # ── Load transactions ──
+    tx_query = (
+        select(Transaction, Document.file_name, Document.provider_guess)
         .join(Document, Transaction.doc_id == Document.doc_id)
     )
     if doc_ids is not None:
-        query = query.where(Transaction.doc_id.in_(doc_ids))
-    query = query.order_by(Document.file_name, Transaction.row_index)
+        tx_query = tx_query.where(Transaction.doc_id.in_(doc_ids))
+    tx_query = tx_query.order_by(Document.file_name, Transaction.row_index)
 
-    result = await session.execute(query)
-    rows = result.all()
+    tx_result = await session.execute(tx_query)
+    rows = tx_result.all()
 
     if not rows:
         raise HTTPException(status_code=404, detail="No transactions found")
 
-    # Build workbook
+    # ── Build smart filename ──
+    now_str = dt.now(timezone.utc).strftime("%Y%m%d_%H%M")
+    if filename is None:
+        if len(docs) == 1:
+            d = docs[0]
+            bank = (d.provider_guess or "Unknown").replace(" ", "")
+            pc = (d.account_holder_postcode or "").replace(" ", "")
+            name_part = (d.account_holder_name or "").split()[0] if d.account_holder_name else ""
+            parts = [bank]
+            if name_part:
+                parts.append(name_part)
+            if pc:
+                parts.append(pc)
+            parts.append(now_str)
+            filename = "_".join(parts) + ".xlsx"
+        else:
+            banks = set(d.provider_guess or "Unknown" for d in docs)
+            bank_str = "_".join(sorted(banks)).replace(" ", "") if len(banks) <= 3 else f"{len(docs)}docs"
+            filename = f"{bank_str}_{now_str}.xlsx"
+    # Sanitise filename
+    filename = "".join(c if c.isalnum() or c in "._-" else "_" for c in filename)
+
+    # ── Build workbook ──
     wb = Workbook()
     ws = wb.active
     ws.title = "Transactions"
 
     # Styles
-    header_font = Font(name="Arial", bold=True, color="FFFFFF", size=11)
-    header_fill = PatternFill("solid", fgColor="1F4E79")
-    header_align = Alignment(horizontal="center", vertical="center", wrap_text=True)
-    thin_border = Border(
-        bottom=Side(style="thin", color="D9E2F3"),
-    )
-    date_font = Font(name="Arial", size=10)
-    text_font = Font(name="Arial", size=10)
-    money_font = Font(name="Arial", size=10)
+    hdr_font = Font(name="Arial", bold=True, color="FFFFFF", size=11)
+    hdr_fill = PatternFill("solid", fgColor="1F4E79")
+    hdr_align = Alignment(horizontal="center", vertical="center", wrap_text=True)
+    label_font = Font(name="Arial", bold=True, size=10, color="1F4E79")
+    value_font = Font(name="Arial", size=10)
+    thin_border = Border(bottom=Side(style="thin", color="D9E2F3"))
     debit_font = Font(name="Arial", size=10, color="CC0000")
     credit_font = Font(name="Arial", size=10, color="006600")
+    money_font = Font(name="Arial", size=10)
+    muted_font = Font(name="Arial", size=9, color="808080")
 
-    # Determine if multi-file
-    unique_files = set(fname for _, fname in rows)
-    multi_file = len(unique_files) > 1
+    # ── Summary section ──
+    row = 1
+    multi_file = len(docs) > 1
 
-    # Headers
+    for d in docs:
+        processed_dt = d.updated_at
+
+        summary_items = [
+            ("Bank", d.provider_guess or "Unknown"),
+            ("Account Holder", d.account_holder_name or "--"),
+            ("Address", d.account_holder_address or "--"),
+            ("Postcode", d.account_holder_postcode or "--"),
+            ("Statement File", d.file_name),
+            ("Processed", processed_dt.strftime("%d/%m/%Y %H:%M") if processed_dt else "--"),
+        ]
+
+        for label, value in summary_items:
+            ws.cell(row=row, column=1, value=label).font = label_font
+            ws.cell(row=row, column=2, value=value).font = value_font
+            row += 1
+
+        if multi_file:
+            row += 1  # Blank separator between docs
+
+    row += 1  # Blank row before table
+
+    # ── Transaction table headers ──
     headers = []
     if multi_file:
         headers.append("File")
     headers.extend(["Date", "Description", "Amount", "Direction", "Balance"])
 
+    table_start_row = row
     for col_idx, header in enumerate(headers, 1):
-        cell = ws.cell(row=1, column=col_idx, value=header)
-        cell.font = header_font
-        cell.fill = header_fill
-        cell.alignment = header_align
+        cell = ws.cell(row=row, column=col_idx, value=header)
+        cell.font = hdr_font
+        cell.fill = hdr_fill
+        cell.alignment = hdr_align
+    row += 1
 
-    # Freeze top row
-    ws.freeze_panes = "A2"
+    # Freeze at table header
+    ws.freeze_panes = ws.cell(row=row, column=1).coordinate
 
-    # Data rows
-    for row_idx, (t, fname) in enumerate(rows, 2):
+    # ── Transaction data ──
+    for t, fname, provider in rows:
         col = 1
         if multi_file:
-            c = ws.cell(row=row_idx, column=col, value=fname or "")
-            c.font = text_font
+            c = ws.cell(row=row, column=col, value=fname or "")
+            c.font = value_font
             c.border = thin_border
             col += 1
 
         # Date
-        c = ws.cell(row=row_idx, column=col, value=t.posted_date)
-        c.font = date_font
+        c = ws.cell(row=row, column=col, value=t.posted_date)
+        c.font = value_font
         c.number_format = "DD/MM/YYYY"
         c.border = thin_border
         col += 1
 
         # Description
-        desc = t.description_clean or t.description_raw or ""
-        c = ws.cell(row=row_idx, column=col, value=desc)
-        c.font = text_font
+        c = ws.cell(row=row, column=col, value=t.description_clean or t.description_raw or "")
+        c.font = value_font
         c.border = thin_border
         col += 1
 
-        # Amount (signed: negative for debits)
+        # Amount (signed)
         amt = float(t.amount) if t.amount is not None else None
         if amt is not None and t.direction == "DEBIT":
             amt = -abs(amt)
-        c = ws.cell(row=row_idx, column=col, value=amt)
+        c = ws.cell(row=row, column=col, value=amt)
         c.number_format = '£#,##0.00;[Red]-£#,##0.00;"-"'
         c.font = debit_font if t.direction == "DEBIT" else credit_font if t.direction == "CREDIT" else money_font
         c.border = thin_border
         col += 1
 
         # Direction
-        c = ws.cell(row=row_idx, column=col, value=t.direction or "")
-        c.font = debit_font if t.direction == "DEBIT" else credit_font if t.direction == "CREDIT" else text_font
+        c = ws.cell(row=row, column=col, value=t.direction or "")
+        c.font = debit_font if t.direction == "DEBIT" else credit_font if t.direction == "CREDIT" else value_font
         c.border = thin_border
         col += 1
 
         # Balance
         bal = float(t.running_balance) if t.running_balance is not None else None
-        c = ws.cell(row=row_idx, column=col, value=bal)
+        c = ws.cell(row=row, column=col, value=bal)
         c.number_format = '£#,##0.00;[Red]-£#,##0.00;"-"'
         c.font = money_font
         c.border = thin_border
 
-    # Auto-size columns
+        row += 1
+
+    # ── Column widths ──
     col_widths = {"File": 30, "Date": 14, "Description": 50, "Amount": 16, "Direction": 12, "Balance": 16}
     for col_idx, header in enumerate(headers, 1):
-        ws.column_dimensions[ws.cell(row=1, column=col_idx).column_letter].width = col_widths.get(header, 15)
+        ws.column_dimensions[ws.cell(row=table_start_row, column=col_idx).column_letter].width = col_widths.get(header, 15)
+    # Summary columns
+    ws.column_dimensions["A"].width = max(ws.column_dimensions["A"].width or 0, 18)
+    ws.column_dimensions["B"].width = max(ws.column_dimensions["B"].width or 0, 50)
 
-    # Auto-filter
-    ws.auto_filter.ref = ws.dimensions
+    # Auto-filter on transaction table only
+    last_col_letter = ws.cell(row=table_start_row, column=len(headers)).column_letter
+    ws.auto_filter.ref = f"A{table_start_row}:{last_col_letter}{row - 1}"
 
-    # Write to bytes
+    # ── Write to response ──
     output = io.BytesIO()
     wb.save(output)
     output.seek(0)
