@@ -216,6 +216,28 @@ async def process_all_queued(
     return {"processed": len(results), "results": results}
 
 
+@router.delete("/queue/clear", status_code=status.HTTP_200_OK)
+async def clear_queue(
+    session: AsyncSession = Depends(get_db),
+):
+    """Delete all QUEUED documents and their related data (cascading)."""
+    result = await session.execute(
+        select(Document).where(Document.status == "QUEUED")
+    )
+    docs = result.scalars().all()
+
+    if not docs:
+        return {"message": "No queued documents to clear", "deleted": 0}
+
+    count = len(docs)
+    for doc in docs:
+        await session.delete(doc)
+    await session.flush()
+
+    logger.info("queue_cleared", deleted=count)
+    return {"message": f"Cleared {count} queued documents", "deleted": count}
+
+
 @router.get("/export/all-csv")
 async def export_all_transactions_csv(
     session: AsyncSession = Depends(get_db),
@@ -228,9 +250,6 @@ async def export_all_transactions_csv(
     result = await session.execute(
         select(Transaction, Document.file_name)
         .join(Document, Transaction.doc_id == Document.doc_id)
-        .where(
-            Transaction.amount.isnot(None),
-        )
         .order_by(Document.file_name, Transaction.row_index)
     )
     rows = result.all()
@@ -261,6 +280,32 @@ async def export_all_transactions_csv(
         media_type="text/csv",
         headers={"Content-Disposition": 'attachment; filename="all_transactions.csv"'},
     )
+
+
+@router.get("/export/all-xlsx")
+async def export_all_transactions_xlsx(
+    session: AsyncSession = Depends(get_db),
+):
+    """Export all transactions across all documents as a formatted Excel file."""
+    return await _build_xlsx_response(session, doc_ids=None, filename="all_transactions.xlsx")
+
+
+@router.get("/export/batch-xlsx")
+async def export_batch_transactions_xlsx(
+    doc_ids: str = Query(..., description="Comma-separated document IDs"),
+    session: AsyncSession = Depends(get_db),
+):
+    """Export transactions for specific documents as a formatted Excel file."""
+    id_list = [d.strip() for d in doc_ids.split(",") if d.strip()]
+    if not id_list:
+        raise HTTPException(status_code=400, detail="No document IDs provided")
+
+    try:
+        uuid_list = [uuid.UUID(d) for d in id_list]
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid document ID format")
+
+    return await _build_xlsx_response(session, doc_ids=uuid_list, filename="batch_transactions.xlsx")
 
 
 @router.get("/{doc_id}", response_model=DocumentDetail)
@@ -318,6 +363,33 @@ async def get_document(
         segments=[],  # TODO: map segment summaries with tx counts
         extraction_runs=[],  # TODO: map run summaries
     )
+
+
+@router.delete("/{doc_id}", status_code=status.HTTP_200_OK)
+async def delete_document(
+    doc_id: str,
+    session: AsyncSession = Depends(get_db),
+):
+    """Delete a document and all related data (segments, transactions, etc.)."""
+    try:
+        doc_uuid = uuid.UUID(doc_id)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid doc_id format")
+
+    result = await session.execute(
+        select(Document).where(Document.doc_id == doc_uuid)
+    )
+    doc = result.scalar_one_or_none()
+
+    if not doc:
+        raise HTTPException(status_code=404, detail="Document not found")
+
+    file_name = doc.file_name
+    await session.delete(doc)
+    await session.flush()
+
+    logger.info("document_deleted", doc_id=doc_id, file_name=file_name)
+    return {"message": f"Deleted document: {file_name}", "doc_id": doc_id}
 
 
 @router.get("/{doc_id}/transactions", response_model=TransactionListResponse)
@@ -381,8 +453,6 @@ async def get_document_transactions(
                 confidence_amount=float(t.confidence_amount) if t.confidence_amount else None,
                 confidence_direction=float(t.confidence_direction) if t.confidence_direction else None,
                 confidence_date=float(t.confidence_date) if t.confidence_date else None,
-                confidence_description=float(t.confidence_description) if t.confidence_description else None,
-                confidence_balance=float(t.confidence_balance) if t.confidence_balance else None,
             )
             for t in txns
         ],
@@ -418,10 +488,7 @@ async def export_transactions_csv(
     # Get transactions
     result = await session.execute(
         select(Transaction)
-        .where(
-            Transaction.doc_id == doc_uuid,
-            Transaction.amount.isnot(None),
-        )
+        .where(Transaction.doc_id == doc_uuid)
         .order_by(Transaction.row_index)
     )
     txns = result.scalars().all()
@@ -460,6 +527,28 @@ async def export_transactions_csv(
     )
 
 
+@router.get("/{doc_id}/export/xlsx")
+async def export_transactions_xlsx(
+    doc_id: str,
+    session: AsyncSession = Depends(get_db),
+):
+    """Export document transactions as a formatted Excel file."""
+    try:
+        doc_uuid = uuid.UUID(doc_id)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid document ID")
+
+    result = await session.execute(
+        select(Document).where(Document.doc_id == doc_uuid)
+    )
+    doc = result.scalar_one_or_none()
+    if not doc:
+        raise HTTPException(status_code=404, detail="Document not found")
+
+    safe_name = (doc.file_name or "export").replace(".pdf", "").replace(" ", "_")
+    return await _build_xlsx_response(session, doc_ids=[doc_uuid], filename=f"{safe_name}_transactions.xlsx")
+
+
 @router.post("/{doc_id}/process", status_code=status.HTTP_202_ACCEPTED)
 async def process_document_now(
     doc_id: str,
@@ -490,3 +579,134 @@ async def process_document_now(
     except Exception as e:
         logger.error("inline_processing_failed", doc_id=doc_id, error=str(e))
         raise HTTPException(status_code=500, detail=f"Processing failed: {str(e)}")
+
+
+# ─── Shared XLSX builder ─────────────────────────────────────
+
+async def _build_xlsx_response(
+    session: AsyncSession,
+    doc_ids: list | None,
+    filename: str,
+):
+    """Build a formatted Excel file from transactions and return as streaming response."""
+    import io
+    from fastapi.responses import StreamingResponse
+    from openpyxl import Workbook
+    from openpyxl.styles import Font, PatternFill, Alignment, Border, Side, numbers
+
+    # Query transactions
+    query = (
+        select(Transaction, Document.file_name)
+        .join(Document, Transaction.doc_id == Document.doc_id)
+    )
+    if doc_ids is not None:
+        query = query.where(Transaction.doc_id.in_(doc_ids))
+    query = query.order_by(Document.file_name, Transaction.row_index)
+
+    result = await session.execute(query)
+    rows = result.all()
+
+    if not rows:
+        raise HTTPException(status_code=404, detail="No transactions found")
+
+    # Build workbook
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "Transactions"
+
+    # Styles
+    header_font = Font(name="Arial", bold=True, color="FFFFFF", size=11)
+    header_fill = PatternFill("solid", fgColor="1F4E79")
+    header_align = Alignment(horizontal="center", vertical="center", wrap_text=True)
+    thin_border = Border(
+        bottom=Side(style="thin", color="D9E2F3"),
+    )
+    date_font = Font(name="Arial", size=10)
+    text_font = Font(name="Arial", size=10)
+    money_font = Font(name="Arial", size=10)
+    debit_font = Font(name="Arial", size=10, color="CC0000")
+    credit_font = Font(name="Arial", size=10, color="006600")
+
+    # Determine if multi-file
+    unique_files = set(fname for _, fname in rows)
+    multi_file = len(unique_files) > 1
+
+    # Headers
+    headers = []
+    if multi_file:
+        headers.append("File")
+    headers.extend(["Date", "Description", "Amount", "Direction", "Balance"])
+
+    for col_idx, header in enumerate(headers, 1):
+        cell = ws.cell(row=1, column=col_idx, value=header)
+        cell.font = header_font
+        cell.fill = header_fill
+        cell.alignment = header_align
+
+    # Freeze top row
+    ws.freeze_panes = "A2"
+
+    # Data rows
+    for row_idx, (t, fname) in enumerate(rows, 2):
+        col = 1
+        if multi_file:
+            c = ws.cell(row=row_idx, column=col, value=fname or "")
+            c.font = text_font
+            c.border = thin_border
+            col += 1
+
+        # Date
+        c = ws.cell(row=row_idx, column=col, value=t.posted_date)
+        c.font = date_font
+        c.number_format = "DD/MM/YYYY"
+        c.border = thin_border
+        col += 1
+
+        # Description
+        desc = t.description_clean or t.description_raw or ""
+        c = ws.cell(row=row_idx, column=col, value=desc)
+        c.font = text_font
+        c.border = thin_border
+        col += 1
+
+        # Amount (signed: negative for debits)
+        amt = float(t.amount) if t.amount is not None else None
+        if amt is not None and t.direction == "DEBIT":
+            amt = -abs(amt)
+        c = ws.cell(row=row_idx, column=col, value=amt)
+        c.number_format = '£#,##0.00;[Red]-£#,##0.00;"-"'
+        c.font = debit_font if t.direction == "DEBIT" else credit_font if t.direction == "CREDIT" else money_font
+        c.border = thin_border
+        col += 1
+
+        # Direction
+        c = ws.cell(row=row_idx, column=col, value=t.direction or "")
+        c.font = debit_font if t.direction == "DEBIT" else credit_font if t.direction == "CREDIT" else text_font
+        c.border = thin_border
+        col += 1
+
+        # Balance
+        bal = float(t.running_balance) if t.running_balance is not None else None
+        c = ws.cell(row=row_idx, column=col, value=bal)
+        c.number_format = '£#,##0.00;[Red]-£#,##0.00;"-"'
+        c.font = money_font
+        c.border = thin_border
+
+    # Auto-size columns
+    col_widths = {"File": 30, "Date": 14, "Description": 50, "Amount": 16, "Direction": 12, "Balance": 16}
+    for col_idx, header in enumerate(headers, 1):
+        ws.column_dimensions[ws.cell(row=1, column=col_idx).column_letter].width = col_widths.get(header, 15)
+
+    # Auto-filter
+    ws.auto_filter.ref = ws.dimensions
+
+    # Write to bytes
+    output = io.BytesIO()
+    wb.save(output)
+    output.seek(0)
+
+    return StreamingResponse(
+        iter([output.getvalue()]),
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )

@@ -41,8 +41,14 @@ code, .mono { font-family: 'JetBrains Mono', monospace; }
 .nav-btn:hover { color: var(--text-white); background: var(--bg-hover); }
 .nav-btn.active { color: var(--text-white); background: rgba(30,41,59,1); }
 .nav-badge { margin-left: 6px; padding: 1px 6px; font-size: 10px; font-weight: 700; border-radius: 9999px; background: var(--amber-dim); color: var(--amber); }
-.upload-btn { padding: 8px 16px; border-radius: 8px; font-size: 13px; font-weight: 600; border: none; cursor: pointer; background: var(--cyan); color: white; transition: all 0.15s; display: flex; align-items: center; gap: 6px; }
-.upload-btn:hover { background: #06b6d4; }
+.header-actions { display: flex; align-items: center; gap: 8px; }
+.action-btn { padding: 8px 14px; border-radius: 8px; font-size: 12px; font-weight: 600; border: none; cursor: pointer; transition: all 0.15s; display: flex; align-items: center; gap: 6px; text-decoration: none; color: white; }
+.action-btn:hover { filter: brightness(1.15); }
+.action-btn.primary { background: var(--cyan); }
+.action-btn.success { background: var(--emerald); }
+.action-btn.warning { background: var(--amber); color: #1a1a1a; }
+.action-btn.danger { background: var(--red); }
+.action-btn:disabled { opacity: 0.4; cursor: not-allowed; filter: none; }
 .main { padding: 32px 0; }
 
 /* ═══ METRICS GRID ════════════════════════════════════════ */
@@ -121,10 +127,6 @@ tbody tr:hover { background: var(--bg-hover); }
 .review-reason { font-size: 11px; font-family: 'JetBrains Mono', monospace; padding: 2px 8px; border-radius: 4px; background: var(--red-dim); color: var(--red); border: 1px solid var(--red-border); }
 .review-time { font-size: 11px; color: var(--text-muted); }
 .review-actions { display: flex; align-items: center; gap: 8px; }
-.priority-badge { font-size: 11px; font-weight: 700; padding: 4px 8px; border-radius: 4px; }
-.priority-1 { background: var(--red-dim); color: var(--red); }
-.priority-2 { background: var(--amber-dim); color: var(--amber); }
-.priority-3 { background: var(--slate-dim); color: var(--slate); }
 .review-btn { padding: 6px 12px; font-size: 11px; font-weight: 500; border-radius: 8px; border: 1px solid var(--cyan-border); background: var(--cyan-dim); color: var(--cyan); cursor: pointer; transition: all 0.15s; }
 .review-btn:hover { background: rgba(6,182,212,0.2); }
 
@@ -141,7 +143,7 @@ tbody tr:hover { background: var(--bg-hover); }
 
 /* ═══ UPLOAD MODAL ════════════════════════════════════════ */
 .modal-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.7); backdrop-filter: blur(4px); z-index: 50; display: flex; align-items: center; justify-content: center; }
-.modal { background: #0f172a; border: 1px solid #334155; border-radius: 16px; padding: 32px; width: 100%; max-width: 480px; box-shadow: 0 25px 50px rgba(0,0,0,0.5); }
+.modal { background: #0f172a; border: 1px solid #334155; border-radius: 16px; padding: 32px; width: 100%; max-width: 520px; box-shadow: 0 25px 50px rgba(0,0,0,0.5); }
 .modal-title { font-size: 18px; font-weight: 700; color: var(--text-white); }
 .modal-close { font-size: 24px; color: var(--text-muted); cursor: pointer; border: none; background: none; line-height: 1; }
 .modal-close:hover { color: var(--text-white); }
@@ -156,6 +158,27 @@ tbody tr:hover { background: var(--bg-hover); }
 .btn-submit { background: var(--cyan); color: white; }
 .btn-submit:hover { background: #06b6d4; }
 .btn-submit:disabled { opacity: 0.3; cursor: not-allowed; }
+.file-list { max-height: 200px; overflow-y: auto; margin: 12px 0; }
+.file-item { display: flex; justify-content: space-between; align-items: center; padding: 8px 12px; background: rgba(30,41,59,0.5); border-radius: 8px; margin-bottom: 6px; }
+.file-item-name { font-size: 13px; color: var(--text-white); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 300px; }
+.file-item-size { font-size: 11px; color: var(--text-muted); margin-left: 8px; white-space: nowrap; }
+.file-item-remove { background: none; border: none; color: var(--red); cursor: pointer; font-size: 16px; padding: 2px 6px; border-radius: 4px; line-height: 1; }
+.file-item-remove:hover { background: var(--red-dim); }
+.delete-btn { background: none; border: 1px solid transparent; color: var(--text-muted); cursor: pointer; font-size: 14px; padding: 4px 8px; border-radius: 6px; transition: all 0.15s; line-height: 1; }
+.delete-btn:hover { color: var(--red); background: var(--red-dim); border-color: var(--red-border); }
+
+/* ═══ TOAST ═══════════════════════════════════════════════ */
+.toast-container { position: fixed; top: 80px; right: 24px; z-index: 100; display: flex; flex-direction: column; gap: 8px; }
+.toast { padding: 12px 20px; border-radius: 10px; font-size: 13px; font-weight: 500; animation: slideIn 0.3s ease-out; max-width: 400px; }
+.toast.success { background: #065f46; color: #6ee7b7; border: 1px solid var(--emerald-border); }
+.toast.error { background: #7f1d1d; color: #fca5a5; border: 1px solid var(--red-border); }
+.toast.info { background: #1e3a5f; color: #93c5fd; border: 1px solid var(--blue-border); }
+@keyframes slideIn { from { opacity: 0; transform: translateX(40px); } to { opacity: 1; transform: translateX(0); } }
+
+/* ═══ BATCH PROGRESS ═════════════════════════════════════ */
+.batch-progress { background: var(--bg-card); border: 1px solid var(--cyan-border); border-radius: 12px; padding: 16px 24px; margin-bottom: 24px; }
+.batch-progress-bar { width: 100%; height: 8px; background: #1e293b; border-radius: 4px; overflow: hidden; margin-top: 10px; }
+.batch-progress-fill { height: 100%; background: linear-gradient(90deg, var(--cyan), var(--emerald)); border-radius: 4px; transition: width 0.5s ease; }
 
 /* ═══ ANIMATION ═══════════════════════════════════════════ */
 @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.4; } }
@@ -172,39 +195,53 @@ tbody tr:hover { background: var(--bg-hover); }
 <body>
 
 <div id="app"></div>
+<div id="toast-container" class="toast-container"></div>
 
 <script>
 // ═══════════════════════════════════════════════════════════
 // STATE
 // ═══════════════════════════════════════════════════════════
-const POLL_INTERVAL = 10000; // 10 seconds
+const POLL_INTERVAL = 10000;
+const FAST_POLL = 3000;
 
 const state = {
-  view: 'overview',        // overview | documents | review
+  view: 'overview',
   documents: [],
   selectedDoc: null,
   transactions: [],
-  reviewQueue: [],
-  stats: { total: 0, today: 0, review: 0, avgConf: 0, reconRate: 0, totalTx: 0, avgTime: 0, queue: 0 },
+  stats: { total: 0, today: 0, review: 0, avgConf: 0, queue: 0 },
   filter: 'ALL',
   apiConnected: false,
   showUpload: false,
-  uploadFile: null,
+  uploadFiles: [],
   uploading: false,
+  uploadProgress: '',
+  pendingBatch: [],
+  batchDownloaded: false,
+  fastPolling: false,
 };
+
+// ═══════════════════════════════════════════════════════════
+// TOAST
+// ═══════════════════════════════════════════════════════════
+function showToast(msg, type = 'info', duration = 4000) {
+  const c = document.getElementById('toast-container');
+  const t = document.createElement('div');
+  t.className = `toast ${type}`;
+  t.textContent = msg;
+  c.appendChild(t);
+  setTimeout(() => { t.style.opacity = '0'; setTimeout(() => t.remove(), 300); }, duration);
+}
 
 // ═══════════════════════════════════════════════════════════
 // API
 // ═══════════════════════════════════════════════════════════
-async function api(path) {
+async function api(path, opts) {
   try {
-    const r = await fetch(path);
+    const r = await fetch(path, opts);
     if (!r.ok) throw new Error(r.statusText);
     return await r.json();
-  } catch (e) {
-    console.warn(`API ${path}:`, e.message);
-    return null;
-  }
+  } catch (e) { console.warn(`API ${path}:`, e.message); return null; }
 }
 
 async function refreshData() {
@@ -215,262 +252,245 @@ async function refreshData() {
   if (resp && resp.documents && Array.isArray(resp.documents)) {
     state.documents = resp.documents;
     const docs = resp.documents;
-    // Compute stats from real data
     state.stats.total = resp.total || docs.length;
-    state.stats.today = docs.filter(d => {
-      const dt = new Date(d.created_at);
-      const now = new Date();
-      return dt.toDateString() === now.toDateString();
-    }).length;
+    state.stats.today = docs.filter(d => new Date(d.created_at).toDateString() === new Date().toDateString()).length;
     state.stats.review = docs.filter(d => d.status === 'NEEDS_REVIEW').length;
-    state.stats.avgConf = 0;
-    state.stats.queue = docs.filter(d => ['QUEUED', 'RENDERING', 'PREPROCESSING', 'EXTRACTING', 'SEGMENTING', 'VALIDATING'].includes(d.status)).length;
+    state.stats.queue = docs.filter(d => ['QUEUED','RENDERING','PREPROCESSING','EXTRACTING','SEGMENTING','VALIDATING'].includes(d.status)).length;
+    checkBatchCompletion(docs);
   }
-
   render();
 }
 
+// ═══════════════════════════════════════════════════════════
+// BATCH TRACKING & AUTO-DOWNLOAD
+// ═══════════════════════════════════════════════════════════
+function checkBatchCompletion(docs) {
+  if (!state.pendingBatch.length || state.batchDownloaded) return;
+  const batch = docs.filter(d => state.pendingBatch.includes(d.doc_id));
+  if (!batch.length) return;
+
+  const active = ['QUEUED','RENDERING','PREPROCESSING','EXTRACTING','SEGMENTING','VALIDATING'];
+  const still = batch.filter(d => active.includes(d.status));
+  const done = batch.filter(d => d.status === 'COMPLETED' || d.status === 'NEEDS_REVIEW');
+  const failed = batch.filter(d => d.status === 'FAILED');
+
+  if (still.length === 0) {
+    stopFastPolling();
+    if (done.length > 0) {
+      state.batchDownloaded = true;
+      const ids = done.map(d => d.doc_id).join(',');
+      const url = done.length === 1
+        ? `/api/v1/documents/${done[0].doc_id}/export/xlsx`
+        : `/api/v1/documents/export/batch-xlsx?doc_ids=${encodeURIComponent(ids)}`;
+      showToast(`✓ ${done.length} file${done.length>1?'s':''} processed — downloading Excel...`, 'success', 5000);
+      setTimeout(() => { const a = document.createElement('a'); a.href = url; a.download = ''; document.body.appendChild(a); a.click(); a.remove(); }, 500);
+    }
+    if (failed.length > 0) showToast(`✗ ${failed.length} file${failed.length>1?'s':''} failed`, 'error', 6000);
+    setTimeout(() => { state.pendingBatch = []; state.batchDownloaded = false; render(); }, 2000);
+  }
+}
+
+let fastPollTimer = null;
+function startFastPolling() { if (state.fastPolling) return; state.fastPolling = true; fastPollTimer = setInterval(refreshData, FAST_POLL); }
+function stopFastPolling() { state.fastPolling = false; if (fastPollTimer) { clearInterval(fastPollTimer); fastPollTimer = null; } }
+
+// ═══════════════════════════════════════════════════════════
+// ACTIONS
+// ═══════════════════════════════════════════════════════════
 async function processAllQueued() {
   try {
     const r = await fetch('/api/v1/documents/process-all', { method: 'POST' });
-    if (r.ok) {
-      const data = await r.json();
-      alert('Processing started: ' + data.processed + ' documents');
-      // Poll more frequently during processing
-      const fastPoll = setInterval(async () => { await refreshData(); }, 3000);
-      setTimeout(() => clearInterval(fastPoll), 120000); // Stop after 2 min
-    } else {
-      alert('Failed to start processing: ' + r.status);
-    }
-  } catch (e) {
-    alert('Error: ' + e.message);
-  }
+    if (r.ok) { const d = await r.json(); showToast(`Processing ${d.processed} document${d.processed!==1?'s':''}`, 'info'); startFastPolling(); setTimeout(stopFastPolling, 120000); }
+    else showToast('Failed: ' + r.status, 'error');
+  } catch (e) { showToast('Error: ' + e.message, 'error'); }
   await refreshData();
 }
 
-async function processSingle(docId) {
-  try {
-    const r = await fetch('/api/v1/documents/' + docId + '/process', { method: 'POST' });
-    if (r.ok) {
-      const data = await r.json();
-      alert('Processed: ' + data.status + ' — ' + (data.transactions || 0) + ' transactions');
-    } else {
-      alert('Processing failed: ' + r.status);
-    }
-  } catch (e) {
-    alert('Error: ' + e.message);
+async function uploadFiles() {
+  if (!state.uploadFiles.length) return;
+  state.uploading = true; render();
+  const ids = [];
+  for (let i = 0; i < state.uploadFiles.length; i++) {
+    state.uploadProgress = `Uploading ${i+1}/${state.uploadFiles.length}...`; render();
+    const fd = new FormData(); fd.append('file', state.uploadFiles[i]);
+    try {
+      const r = await fetch('/api/v1/documents', { method: 'POST', body: fd });
+      if (r.ok) { const d = await r.json(); ids.push(d.doc_id); }
+      else showToast(`Failed: ${state.uploadFiles[i].name}`, 'error');
+    } catch (e) { showToast('Upload error: ' + e.message, 'error'); }
   }
+  state.showUpload = false; state.uploadFiles = []; state.uploading = false; state.uploadProgress = '';
+  if (ids.length) {
+    showToast(`${ids.length} file${ids.length>1?'s':''} uploaded — processing...`, 'success');
+    state.pendingBatch = ids; state.batchDownloaded = false;
+    await refreshData();
+    try { await fetch('/api/v1/documents/process-all', { method: 'POST' }); startFastPolling(); setTimeout(stopFastPolling, 180000); } catch(e) {}
+  }
+  render();
+}
+
+async function deleteDocument(docId, fileName, evt) {
+  evt.stopPropagation();
+  if (!confirm(`Delete "${fileName}"?\n\nThis removes the document and all extracted data permanently.`)) return;
+  try {
+    const r = await fetch(`/api/v1/documents/${docId}`, { method: 'DELETE' });
+    if (r.ok) { showToast(`Deleted: ${fileName}`, 'info'); if (state.selectedDoc && state.selectedDoc.doc_id === docId) state.selectedDoc = null; }
+    else showToast('Delete failed: ' + r.status, 'error');
+  } catch (e) { showToast('Error: ' + e.message, 'error'); }
   await refreshData();
 }
 
-async function uploadFile() {
-  if (!state.uploadFile) return;
-  state.uploading = true;
-  render();
-
-  const fd = new FormData();
-  fd.append('file', state.uploadFile);
-
+async function clearQueue() {
+  const n = state.documents.filter(d => d.status === 'QUEUED').length;
+  if (!n) { showToast('No queued documents', 'info'); return; }
+  if (!confirm(`Clear ${n} queued document${n!==1?'s':''}? This cannot be undone.`)) return;
   try {
-    const r = await fetch('/api/v1/documents', { method: 'POST', body: fd });
-    if (r.ok) {
-      state.showUpload = false;
-      state.uploadFile = null;
-      state.uploading = false;
-      await refreshData();
-      return;
-    } else {
-      const err = await r.text();
-      console.error('Upload error:', r.status, err);
-      alert('Upload failed: ' + r.status);
-    }
-  } catch (e) {
-    console.error('Upload failed:', e);
-    alert('Upload failed: ' + e.message);
-  }
-  state.uploading = false;
-  render();
+    const r = await fetch('/api/v1/documents/queue/clear', { method: 'DELETE' });
+    if (r.ok) { const d = await r.json(); showToast(`Cleared ${d.deleted} document${d.deleted!==1?'s':''}`, 'info'); }
+    else showToast('Failed: ' + r.status, 'error');
+  } catch (e) { showToast('Error: ' + e.message, 'error'); }
+  await refreshData();
 }
 
 async function loadTransactions(docId) {
-  const txns = await api(`/api/v1/documents/${docId}/transactions`);
-  state.transactions = (txns && Array.isArray(txns)) ? txns : [];
+  const t = await api(`/api/v1/documents/${docId}/transactions`);
+  state.transactions = (t && Array.isArray(t)) ? t : [];
   render();
 }
 
 // ═══════════════════════════════════════════════════════════
 // HELPERS
 // ═══════════════════════════════════════════════════════════
-function fmtDate(iso) {
-  if (!iso) return '--';
-  return new Date(iso).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
-}
-function fmtTime(iso) {
-  if (!iso) return '';
-  return new Date(iso).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' });
-}
-function fmtPct(v) { return v != null ? (v * 100).toFixed(1) + '%' : '--'; }
+function fmtDate(iso) { if (!iso) return '--'; return new Date(iso).toLocaleDateString('en-GB', { day:'2-digit', month:'short', year:'numeric' }); }
+function fmtTime(iso) { if (!iso) return ''; return new Date(iso).toLocaleTimeString('en-GB', { hour:'2-digit', minute:'2-digit' }); }
+function fmtPct(v) { return v != null ? (v*100).toFixed(1)+'%' : '--'; }
 function confClass(v) { return v >= 0.9 ? 'high' : v >= 0.75 ? 'mid' : v >= 0.6 ? 'low' : 'bad'; }
-function fmtMoney(v) { return v != null ? '£' + Math.abs(v).toFixed(2) : '--'; }
+function fmtMoney(v) { return v != null ? '£'+Math.abs(v).toFixed(2) : '--'; }
+function fmtSize(b) { return b > 1048576 ? (b/1048576).toFixed(1)+' MB' : (b/1024).toFixed(0)+' KB'; }
 
 function h(tag, attrs, ...children) {
   const el = document.createElement(tag);
-  if (attrs) Object.entries(attrs).forEach(([k, v]) => {
-    if (k === 'className') el.className = v;
+  if (attrs) Object.entries(attrs).forEach(([k,v]) => {
+    if (k==='className') el.className=v;
     else if (k.startsWith('on')) el.addEventListener(k.slice(2).toLowerCase(), v);
-    else if (k === 'style' && typeof v === 'object') Object.assign(el.style, v);
-    else if (k === 'innerHTML') el.innerHTML = v;
-    else if (typeof v === 'boolean') { if (v) el.setAttribute(k, ''); else el.removeAttribute(k); }
-    else el.setAttribute(k, v);
+    else if (k==='style' && typeof v==='object') Object.assign(el.style, v);
+    else if (k==='innerHTML') el.innerHTML=v;
+    else if (typeof v==='boolean') { if (v) el.setAttribute(k,''); else el.removeAttribute(k); }
+    else el.setAttribute(k,v);
   });
-  children.flat(Infinity).forEach(c => {
-    if (c == null || c === false) return;
-    el.appendChild(typeof c === 'string' || typeof c === 'number' ? document.createTextNode(c) : c);
-  });
+  children.flat(Infinity).forEach(c => { if (c==null||c===false) return; el.appendChild(typeof c==='string'||typeof c==='number' ? document.createTextNode(c) : c); });
   return el;
 }
 
-function badge(status) {
-  return h('span', { className: `badge badge-${status}` },
-    h('span', { className: 'badge-dot' }),
-    status.replace(/_/g, ' ')
-  );
-}
+function badge(s) { return h('span',{className:`badge badge-${s}`}, h('span',{className:'badge-dot'}), s.replace(/_/g,' ')); }
 
-function confMeter(value) {
-  if (value == null) return h('span', { style: { color: 'var(--text-muted)', fontSize: '13px' } }, '--');
-  const pct = Math.round(value * 100);
-  const cls = confClass(value);
-  return h('div', { className: 'conf-wrap' },
-    h('div', { className: 'conf-bar' },
-      h('div', { className: `conf-fill ${cls}`, style: { width: pct + '%' } })
-    ),
-    h('span', { className: `conf-text ${cls}` }, pct + '%')
-  );
+function confMeter(v) {
+  if (v==null) return h('span',{style:{color:'var(--text-muted)',fontSize:'13px'}},'--');
+  const p=Math.round(v*100), c=confClass(v);
+  return h('div',{className:'conf-wrap'}, h('div',{className:'conf-bar'}, h('div',{className:`conf-fill ${c}`,style:{width:p+'%'}})), h('span',{className:`conf-text ${c}`},p+'%'));
 }
 
 // ═══════════════════════════════════════════════════════════
 // VIEWS
 // ═══════════════════════════════════════════════════════════
 function renderHeader() {
-  return h('header', { className: 'header' },
-    h('div', { className: 'container header-inner' },
-      h('div', { className: 'logo' },
-        h('div', { className: 'logo-icon' }, 'SE'),
-        h('div', null,
-          h('div', { className: 'logo-text-main' }, 'Statement Extraction'),
-          h('div', { className: 'logo-text-sub' }, 'Platform v{{ version }}')
-        ),
-        h('div', { style: { marginLeft: '16px', display: 'flex', alignItems: 'center' } },
-          h('span', { className: `conn-dot ${state.apiConnected ? 'connected' : 'disconnected'}` }),
-          h('span', { className: 'conn-label' }, state.apiConnected ? 'API Connected' : 'Connecting...')
-        )
+  const qc = state.documents.filter(d => d.status === 'QUEUED').length;
+  return h('header',{className:'header'},
+    h('div',{className:'container header-inner'},
+      h('div',{className:'logo'},
+        h('div',{className:'logo-icon'},'SE'),
+        h('div',null, h('div',{className:'logo-text-main'},'Statement Extraction'), h('div',{className:'logo-text-sub'},'Platform')),
+        h('div',{style:{marginLeft:'16px',display:'flex',alignItems:'center'}},
+          h('span',{className:`conn-dot ${state.apiConnected?'connected':'disconnected'}`}),
+          h('span',{className:'conn-label'},state.apiConnected?'API Connected':'Connecting...'))
       ),
-      h('nav', { className: 'nav' },
-        ...['overview', 'documents', 'review'].map(v =>
-          h('button', {
-            className: `nav-btn ${state.view === v ? 'active' : ''}`,
-            onClick: () => { state.view = v; state.selectedDoc = null; render(); }
-          },
-            v.charAt(0).toUpperCase() + v.slice(1),
-            v === 'review' && state.stats.review > 0 ? h('span', { className: 'nav-badge' }, String(state.stats.review)) : null
-          )
-        )
+      h('nav',{className:'nav'},
+        ...['overview','documents','review'].map(v =>
+          h('button',{className:`nav-btn ${state.view===v?'active':''}`, onClick:()=>{state.view=v;state.selectedDoc=null;render();}},
+            v.charAt(0).toUpperCase()+v.slice(1),
+            v==='review'&&state.stats.review>0 ? h('span',{className:'nav-badge'},String(state.stats.review)) : null))
       ),
-      h('button', { className: 'upload-btn', style: { background: 'var(--emerald)' }, onClick: processAllQueued }, '▶ Process All'),
-      h('a', { className: 'upload-btn', href: '/api/v1/documents/export/all-csv', style: { background: 'var(--amber)', textDecoration: 'none', color: 'white' } }, '⬇ Export All CSV'),
-      h('button', { className: 'upload-btn', onClick: () => { state.showUpload = true; render(); } }, '+ Upload')
+      h('div',{className:'header-actions'},
+        qc > 0 ? h('button',{className:'action-btn danger',onClick:clearQueue},'✕ Clear Queue ('+qc+')') : null,
+        h('button',{className:'action-btn success',onClick:processAllQueued},'▶ Process All'),
+        h('a',{className:'action-btn warning',href:'/api/v1/documents/export/all-xlsx',style:{textDecoration:'none'}},'⬇ Export All'),
+        h('button',{className:'action-btn primary',onClick:()=>{state.showUpload=true;state.uploadFiles=[];render();}},'+ Upload')
+      )
     )
+  );
+}
+
+function renderBatchProgress() {
+  if (!state.pendingBatch.length) return null;
+  const batch = state.documents.filter(d => state.pendingBatch.includes(d.doc_id));
+  const active = ['QUEUED','RENDERING','PREPROCESSING','EXTRACTING','SEGMENTING','VALIDATING'];
+  const done = batch.filter(d => !active.includes(d.status)).length;
+  const total = batch.length;
+  const pct = total > 0 ? Math.round(done/total*100) : 0;
+  return h('div',{className:'batch-progress fade-in'},
+    h('div',{style:{display:'flex',justifyContent:'space-between',alignItems:'center'}},
+      h('span',{style:{fontSize:'13px',fontWeight:600,color:'var(--cyan)'}}, `Processing batch: ${done}/${total} complete`),
+      h('span',{style:{fontSize:'12px',color:'var(--text-muted)'}}, pct===100?'Downloading Excel...':'Auto-download when done')
+    ),
+    h('div',{className:'batch-progress-bar'}, h('div',{className:'batch-progress-fill',style:{width:pct+'%'}}))
   );
 }
 
 function renderOverview() {
   const s = state.stats;
-  return h('div', { className: 'fade-in' },
-    h('div', { className: 'metrics' },
-      metricCard('Total Documents', String(s.total), 'All time'),
-      metricCard('Processed Today', String(s.today), `${s.queue} in queue`, 'cyan'),
-      metricCard('Avg Confidence', fmtPct(s.avgConf), 'Document level', s.avgConf >= 0.85 ? 'emerald' : 'amber'),
-      metricCard('Needs Review', String(s.review), 'Pending items', s.review > 0 ? 'amber' : 'emerald')
+  return h('div',{className:'fade-in'},
+    renderBatchProgress(),
+    h('div',{className:'metrics'},
+      metricCard('Total Documents',String(s.total),'All time'),
+      metricCard('Processed Today',String(s.today),`${s.queue} in queue`,'cyan'),
+      metricCard('Avg Confidence',fmtPct(s.avgConf),'Document level',s.avgConf>=0.85?'emerald':'amber'),
+      metricCard('Needs Review',String(s.review),'Pending items',s.review>0?'amber':'emerald')
     ),
-    renderDocTable(state.documents.slice(0, 8), true)
+    renderDocTable(state.documents.slice(0,8), true)
   );
 }
 
-function metricCard(label, value, sub, accent) {
-  return h('div', { className: 'metric-card' },
-    h('div', { className: 'metric-label' }, label),
-    h('div', { className: `metric-value ${accent || ''}` }, value),
-    sub ? h('div', { className: 'metric-sub' }, sub) : null
-  );
+function metricCard(label,value,sub,accent) {
+  return h('div',{className:'metric-card'}, h('div',{className:'metric-label'},label), h('div',{className:`metric-value ${accent||''}`},value), sub?h('div',{className:'metric-sub'},sub):null);
 }
 
 function renderDocTable(docs, showLink) {
-  return h('div', { className: 'panel' },
-    h('div', { className: 'panel-header' },
-      h('div', { className: 'panel-title' }, showLink ? 'Recent Documents' : `Documents (${state.filter === 'ALL' ? docs.length : state.filter})`),
-      showLink ? h('span', { className: 'panel-link', onClick: () => { state.view = 'documents'; render(); } }, 'View All →') : null
+  return h('div',{className:'panel'},
+    h('div',{className:'panel-header'},
+      h('div',{className:'panel-title'}, showLink?'Recent Documents':`Documents (${state.filter==='ALL'?docs.length:state.filter})`),
+      showLink ? h('span',{className:'panel-link',onClick:()=>{state.view='documents';render();}},'View All →') : null
     ),
-    !showLink ? h('div', { style: { padding: '12px 24px', borderBottom: '1px solid var(--border)' } },
-      h('div', { className: 'filters' },
-        ...['ALL', 'COMPLETED', 'NEEDS_REVIEW', 'EXTRACTING', 'QUEUED', 'FAILED'].map(f =>
-          h('button', {
-            className: `filter-btn ${state.filter === f ? 'active' : ''}`,
-            onClick: () => { state.filter = f; render(); }
-          }, f.replace(/_/g, ' '))
-        )
-      )
+    !showLink ? h('div',{style:{padding:'12px 24px',borderBottom:'1px solid var(--border)'}},
+      h('div',{className:'filters'},
+        ...['ALL','COMPLETED','NEEDS_REVIEW','EXTRACTING','QUEUED','FAILED'].map(f =>
+          h('button',{className:`filter-btn ${state.filter===f?'active':''}`,onClick:()=>{state.filter=f;render();}}, f.replace(/_/g,' '))))
     ) : null,
-    h('table', null,
-      h('thead', null,
-        h('tr', null,
-          h('th', null, 'Document'),
-          h('th', null, 'Type'),
-          h('th', null, 'Provider'),
-          h('th', null, 'Pages'),
-          h('th', null, 'Status'),
-          h('th', null, 'Confidence'),
-          h('th', null, 'Txns'),
-          h('th', null, ''),
-          h('th', { style: { textAlign: 'right' } }, 'Txns')
-        )
-      ),
-      h('tbody', null,
+    h('table',null,
+      h('thead',null, h('tr',null,
+        h('th',null,'Document'), h('th',null,'Type'), h('th',null,'Provider'), h('th',null,'Pages'),
+        h('th',null,'Status'), h('th',null,'Confidence'), h('th',null,''),
+        h('th',{style:{textAlign:'right'}},'Txns'), h('th',{style:{textAlign:'center',width:'40px'}},'')
+      )),
+      h('tbody',null,
         ...docs.map(doc =>
-          h('tr', {
-            onClick: () => {
-              state.selectedDoc = doc;
-              state.transactions = [];
-              state.view = 'documents';
-              render();
-              if (doc.status === 'COMPLETED') loadTransactions(doc.doc_id);
-            }
-          },
-            h('td', null,
-              h('div', { className: 'doc-name' }, doc.file_name),
-              h('div', { className: 'doc-date' }, fmtDate(doc.created_at) + ' ' + fmtTime(doc.created_at))
-            ),
-            h('td', null,
-              h('span', { className: `type-badge type-${doc.doc_family || 'UNKNOWN'}` },
-                (doc.doc_family || 'UNKNOWN').replace(/_/g, ' '))
-            ),
-            h('td', { style: { color: 'var(--text-secondary)', fontSize: '13px' } }, doc.provider_guess || '--'),
-            h('td', { className: 'mono', style: { color: 'var(--text-muted)', fontSize: '13px' } }, doc.page_count != null ? String(doc.page_count) : '--'),
-            h('td', null, badge(doc.status)),
-            h('td', null, confMeter(doc.confidence_document)),
-            h('td', { className: 'mono', style: { textAlign: 'right', color: 'var(--text-secondary)', fontSize: '13px' } }, doc.transaction_count != null ? String(doc.transaction_count) : '--'),
-            h('td', null,
-              (doc.status === 'COMPLETED' || doc.status === 'NEEDS_REVIEW') && doc.transaction_count > 0
-                ? h('a', {
-                    href: `/api/v1/documents/${doc.doc_id}/export/csv`,
-                    style: { color: 'var(--emerald)', textDecoration: 'none', fontSize: '12px', fontWeight: '600', padding: '4px 10px', border: '1px solid var(--emerald-border)', borderRadius: '6px', background: 'var(--emerald-dim)' },
-                    onclick: (e) => e.stopPropagation(),
-                  }, '⬇ CSV')
-                : null
-            )
+          h('tr',{onClick:()=>{state.selectedDoc=doc;state.transactions=[];state.view='documents';render();if(doc.status==='COMPLETED'||doc.status==='NEEDS_REVIEW')loadTransactions(doc.doc_id);}},
+            h('td',null, h('div',{className:'doc-name'},doc.file_name), h('div',{className:'doc-date'},fmtDate(doc.created_at)+' '+fmtTime(doc.created_at))),
+            h('td',null, h('span',{className:`type-badge type-${doc.doc_family||'UNKNOWN'}`},(doc.doc_family||'UNKNOWN').replace(/_/g,' '))),
+            h('td',{style:{color:'var(--text-secondary)',fontSize:'13px'}},doc.provider_guess||'--'),
+            h('td',{className:'mono',style:{color:'var(--text-muted)',fontSize:'13px'}},doc.page_count!=null?String(doc.page_count):'--'),
+            h('td',null,badge(doc.status)),
+            h('td',null,confMeter(doc.confidence_document)),
+            h('td',null,
+              (doc.status==='COMPLETED'||doc.status==='NEEDS_REVIEW')&&doc.transaction_count>0
+                ? h('a',{href:`/api/v1/documents/${doc.doc_id}/export/xlsx`,
+                    style:{color:'var(--emerald)',textDecoration:'none',fontSize:'11px',fontWeight:'600',padding:'4px 10px',border:'1px solid var(--emerald-border)',borderRadius:'6px',background:'var(--emerald-dim)'},
+                    onClick:(e)=>e.stopPropagation()},'⬇ Excel') : null),
+            h('td',{className:'mono',style:{textAlign:'right',color:'var(--text-secondary)',fontSize:'13px'}},doc.transaction_count!=null?String(doc.transaction_count):'--'),
+            h('td',{style:{textAlign:'center'}},
+              h('button',{className:'delete-btn',title:'Delete document',onClick:(e)=>deleteDocument(doc.doc_id,doc.file_name,e)},'✕'))
           )
         ),
-        docs.length === 0 ? h('tr', null, h('td', { colspan: '9', style: { textAlign: 'center', padding: '48px', color: 'var(--text-muted)' } }, 'No documents found')) : null
+        docs.length===0 ? h('tr',null,h('td',{colspan:'9',style:{textAlign:'center',padding:'48px',color:'var(--text-muted)'}},'No documents found')) : null
       )
     )
   );
@@ -478,170 +498,145 @@ function renderDocTable(docs, showLink) {
 
 function renderDocuments() {
   if (state.selectedDoc) return renderDetail();
-  const filtered = state.filter === 'ALL' ? state.documents : state.documents.filter(d => d.status === state.filter);
-  return h('div', { className: 'fade-in' },
-    h('div', { style: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '24px' } },
-      h('h2', { style: { fontSize: '20px', fontWeight: 700, color: 'var(--text-white)' } }, 'Documents')
+  const filtered = state.filter==='ALL' ? state.documents : state.documents.filter(d=>d.status===state.filter);
+  return h('div',{className:'fade-in'},
+    renderBatchProgress(),
+    h('div',{style:{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:'24px'}},
+      h('h2',{style:{fontSize:'20px',fontWeight:700,color:'var(--text-white)'}},'Documents')
     ),
-    renderDocTable(filtered, false)
+    renderDocTable(filtered,false)
   );
 }
 
 function renderDetail() {
   const d = state.selectedDoc;
-  return h('div', { className: 'fade-in' },
-    h('span', { className: 'back-link', onClick: () => { state.selectedDoc = null; render(); } }, '← Back to Documents'),
-    h('div', { className: 'detail-header' },
-      h('div', null,
-        h('div', { className: 'detail-title' }, d.file_name),
-        h('div', { className: 'doc-id' }, d.doc_id)
-      ),
-      badge(d.status)
+  return h('div',{className:'fade-in'},
+    h('span',{className:'back-link',onClick:()=>{state.selectedDoc=null;render();}},'← Back to Documents'),
+    h('div',{className:'detail-header'},
+      h('div',null, h('div',{className:'detail-title'},d.file_name), h('div',{className:'doc-id'},d.doc_id)),
+      h('div',{style:{display:'flex',alignItems:'center',gap:'12px'}},
+        badge(d.status),
+        h('button',{className:'delete-btn',title:'Delete',style:{fontSize:'16px',padding:'6px 10px'},onClick:(e)=>deleteDocument(d.doc_id,d.file_name,e)},'✕ Delete'))
     ),
-    h('div', { className: 'detail-metrics' },
-      metricCard('Provider', d.provider_guess || 'Unknown'),
-      metricCard('Doc Type', (d.doc_family || 'UNKNOWN').replace(/_/g, ' ')),
-      metricCard('Pages', d.page_count != null ? String(d.page_count) : '--'),
-      metricCard('Confidence', fmtPct(d.confidence_document), null, d.confidence_document >= 0.85 ? 'emerald' : 'amber'),
-      metricCard('Transactions', d.transaction_count != null ? String(d.transaction_count) : '0', null, 'cyan')
+    h('div',{className:'detail-metrics'},
+      metricCard('Provider',d.provider_guess||'Unknown'),
+      metricCard('Doc Type',(d.doc_family||'UNKNOWN').replace(/_/g,' ')),
+      metricCard('Pages',d.page_count!=null?String(d.page_count):'--'),
+      metricCard('Confidence',fmtPct(d.confidence_document),null,d.confidence_document>=0.85?'emerald':'amber'),
+      metricCard('Transactions',d.transaction_count!=null?String(d.transaction_count):'0',null,'cyan')
     ),
-    h('div', { className: 'panel' },
-      h('div', { className: 'panel-header', style: { display: 'flex', justifyContent: 'space-between', alignItems: 'center' } },
-        h('div', { className: 'panel-title' }, 'Extracted Transactions'),
-        (d.status === 'COMPLETED' || d.status === 'NEEDS_REVIEW') && d.transaction_count > 0
-          ? h('a', {
-              href: `/api/v1/documents/${d.doc_id}/export/csv`,
-              style: { color: 'var(--emerald)', textDecoration: 'none', fontSize: '13px', fontWeight: '600', padding: '6px 14px', border: '1px solid var(--emerald-border)', borderRadius: '8px', background: 'var(--emerald-dim)', cursor: 'pointer' },
-            }, '⬇ Download CSV')
-          : null
+    h('div',{className:'panel'},
+      h('div',{className:'panel-header',style:{display:'flex',justifyContent:'space-between',alignItems:'center'}},
+        h('div',{className:'panel-title'},'Extracted Transactions'),
+        (d.status==='COMPLETED'||d.status==='NEEDS_REVIEW')&&d.transaction_count>0
+          ? h('a',{href:`/api/v1/documents/${d.doc_id}/export/xlsx`,
+              style:{color:'var(--emerald)',textDecoration:'none',fontSize:'13px',fontWeight:'600',padding:'6px 14px',border:'1px solid var(--emerald-border)',borderRadius:'8px',background:'var(--emerald-dim)',cursor:'pointer'}},'⬇ Download Excel') : null
       ),
       state.transactions.length > 0
-        ? h('table', { className: 'tx-table' },
-            h('thead', null,
-              h('tr', null,
-                h('th', null, 'Date'),
-                h('th', null, 'Description'),
-                h('th', null, 'Direction'),
-                h('th', null, 'Balance'),
-                h('th', { style: { textAlign: 'right' } }, 'Amount')
-              )
-            ),
-            h('tbody', null,
+        ? h('table',{className:'tx-table'},
+            h('thead',null, h('tr',null, h('th',null,'Date'), h('th',null,'Description'), h('th',null,'Direction'), h('th',null,'Balance'), h('th',{style:{textAlign:'right'}},'Amount'))),
+            h('tbody',null,
               ...state.transactions.map(tx =>
-                h('tr', null,
-                  h('td', { style: { fontSize: '12px', color: 'var(--text-secondary)' } }, fmtDate(tx.posted_date)),
-                  h('td', { style: { fontSize: '13px', color: 'var(--text-white)', maxWidth: '300px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } }, tx.description_clean || tx.description_raw || '--'),
-                  h('td', null,
-                    h('span', {
-                      className: `type-badge`,
-                      style: {
-                        background: tx.direction === 'DEBIT' ? 'var(--red-dim)' : tx.direction === 'CREDIT' ? 'var(--emerald-dim)' : 'var(--slate-dim)',
-                        color: tx.direction === 'DEBIT' ? 'var(--red)' : tx.direction === 'CREDIT' ? 'var(--emerald)' : 'var(--slate)'
-                      }
-                    }, tx.direction)
-                  ),
-                  h('td', { className: 'mono', style: { fontSize: '12px', color: 'var(--text-muted)' } }, tx.running_balance != null ? fmtMoney(tx.running_balance) : '--'),
-                  h('td', {
-                    className: 'mono',
-                    style: {
-                      textAlign: 'right', fontSize: '13px', fontWeight: 600,
-                      color: tx.direction === 'DEBIT' ? 'var(--red)' : tx.direction === 'CREDIT' ? 'var(--emerald)' : 'var(--text-secondary)'
-                    }
-                  }, tx.direction === 'DEBIT' ? '-' + fmtMoney(tx.amount) : fmtMoney(tx.amount))
+                h('tr',null,
+                  h('td',{style:{fontSize:'12px',color:'var(--text-secondary)'}},fmtDate(tx.posted_date)),
+                  h('td',{style:{fontSize:'13px',color:'var(--text-white)',maxWidth:'300px',overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}},tx.description_clean||tx.description_raw||'--'),
+                  h('td',null, h('span',{className:'type-badge',style:{
+                    background:tx.direction==='DEBIT'?'var(--red-dim)':tx.direction==='CREDIT'?'var(--emerald-dim)':'var(--slate-dim)',
+                    color:tx.direction==='DEBIT'?'var(--red)':tx.direction==='CREDIT'?'var(--emerald)':'var(--slate)'}},tx.direction)),
+                  h('td',{className:'mono',style:{fontSize:'12px',color:'var(--text-muted)'}},tx.running_balance!=null?fmtMoney(tx.running_balance):'--'),
+                  h('td',{className:'mono',style:{textAlign:'right',fontSize:'13px',fontWeight:600,
+                    color:tx.direction==='DEBIT'?'var(--red)':tx.direction==='CREDIT'?'var(--emerald)':'var(--text-secondary)'}},
+                    tx.direction==='DEBIT'?'-'+fmtMoney(tx.amount):fmtMoney(tx.amount))
                 )
               )
             )
           )
-        : h('div', { className: 'empty-state' },
-            d.status === 'COMPLETED'
-              ? [h('div', null, 'No transactions loaded'),
-                 h('code', null, `GET /api/v1/documents/${d.doc_id}/transactions`)]
-              : d.status === 'FAILED'
-                ? h('div', null, 'Extraction failed. Check logs.')
-                : ['EXTRACTING', 'RENDERING', 'PREPROCESSING', 'SEGMENTING', 'VALIDATING'].includes(d.status)
-                  ? h('div', null, 'Processing in progress...')
-                  : h('div', null, 'Waiting in queue...')
-          )
+        : h('div',{className:'empty-state'},
+            d.status==='COMPLETED' ? [h('div',null,'No transactions loaded'), h('code',null,`GET /api/v1/documents/${d.doc_id}/transactions`)]
+            : d.status==='FAILED' ? h('div',null,'Extraction failed. Check logs.')
+            : ['EXTRACTING','RENDERING','PREPROCESSING','SEGMENTING','VALIDATING'].includes(d.status) ? h('div',null,'Processing...')
+            : h('div',null,'Waiting in queue...'))
     )
   );
 }
 
 function renderReview() {
-  const reviewDocs = state.documents.filter(d => d.status === 'NEEDS_REVIEW');
-  return h('div', { className: 'fade-in' },
-    h('div', { style: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '24px' } },
-      h('h2', { style: { fontSize: '20px', fontWeight: 700, color: 'var(--text-white)' } }, 'Review Queue'),
-      h('span', { style: { fontSize: '13px', color: 'var(--text-muted)' } }, `${reviewDocs.length} pending`)
+  const rd = state.documents.filter(d => d.status==='NEEDS_REVIEW');
+  return h('div',{className:'fade-in'},
+    h('div',{style:{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:'24px'}},
+      h('h2',{style:{fontSize:'20px',fontWeight:700,color:'var(--text-white)'}},'Review Queue'),
+      h('span',{style:{fontSize:'13px',color:'var(--text-muted)'}},`${rd.length} pending`)
     ),
-    ...reviewDocs.map(doc =>
-      h('div', { className: 'review-item' },
-        h('div', { className: 'review-top' },
-          h('div', null,
-            h('div', { style: { color: 'var(--text-white)', fontWeight: 500 } }, doc.file_name),
-            h('div', { style: { display: 'flex', alignItems: 'center', gap: '12px', marginTop: '8px' } },
-              h('span', { className: 'review-reason' }, 'LOW_CONFIDENCE'),
-              h('span', { className: 'review-time' }, fmtDate(doc.created_at))
-            )
-          ),
-          h('div', { className: 'review-actions' },
-            h('button', {
-              className: 'review-btn',
-              onClick: () => { state.selectedDoc = doc; state.view = 'documents'; render(); }
-            }, 'Review')
-          )
-        )
+    ...rd.map(doc =>
+      h('div',{className:'review-item'},
+        h('div',{className:'review-top'},
+          h('div',null,
+            h('div',{style:{color:'var(--text-white)',fontWeight:500}},doc.file_name),
+            h('div',{style:{display:'flex',alignItems:'center',gap:'12px',marginTop:'8px'}},
+              h('span',{className:'review-reason'},'LOW_CONFIDENCE'),
+              h('span',{className:'review-time'},fmtDate(doc.created_at)))),
+          h('div',{className:'review-actions'},
+            h('button',{className:'review-btn',onClick:()=>{state.selectedDoc=doc;state.view='documents';render();}},'Review')))
       )
     ),
-    reviewDocs.length === 0 ? h('div', { className: 'empty-state' },
-      h('div', { style: { fontSize: '36px', marginBottom: '16px' } }, '✓'),
-      h('div', { style: { fontSize: '16px', fontWeight: 500, color: 'var(--text-secondary)' } }, 'All clear'),
-      h('div', null, 'No items pending review')
-    ) : null
+    rd.length===0 ? h('div',{className:'empty-state'},
+      h('div',{style:{fontSize:'36px',marginBottom:'16px'}},'✓'),
+      h('div',{style:{fontSize:'16px',fontWeight:500,color:'var(--text-secondary)'}},'All clear'),
+      h('div',null,'No items pending review')) : null
   );
 }
 
 function renderUploadModal() {
   if (!state.showUpload) return null;
-  const overlay = h('div', { className: 'modal-overlay', onClick: () => { state.showUpload = false; render(); } },
-    h('div', { className: 'modal', onClick: (e) => e.stopPropagation() },
-      h('div', { style: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' } },
-        h('h2', { className: 'modal-title' }, 'Upload Statement'),
-        h('button', { className: 'modal-close', onClick: () => { state.showUpload = false; state.uploadFile = null; render(); } }, '×')
+  const files = state.uploadFiles;
+  const totalSize = files.reduce((s,f) => s+f.size, 0);
+
+  function addFiles(fl) {
+    const pdfs = Array.from(fl).filter(f => f.type==='application/pdf'||f.name.toLowerCase().endsWith('.pdf'));
+    if (!pdfs.length) { showToast('Only PDF files accepted','error'); return; }
+    const existing = new Set(state.uploadFiles.map(f=>f.name));
+    state.uploadFiles = [...state.uploadFiles, ...pdfs.filter(f=>!existing.has(f.name))];
+    render();
+  }
+
+  return h('div',{className:'modal-overlay',onClick:()=>{state.showUpload=false;state.uploadFiles=[];render();}},
+    h('div',{className:'modal',onClick:e=>e.stopPropagation()},
+      h('div',{style:{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:'8px'}},
+        h('h2',{className:'modal-title'},'Upload Statements'),
+        h('button',{className:'modal-close',onClick:()=>{state.showUpload=false;state.uploadFiles=[];render();}},'×')
       ),
-      h('div', {
-        className: `drop-zone ${state.uploadFile ? 'has-file' : ''}`,
-        onClick: () => document.getElementById('file-input').click(),
-        onDragover: (e) => { e.preventDefault(); e.currentTarget.classList.add('dragging'); },
-        onDragleave: (e) => { e.currentTarget.classList.remove('dragging'); },
-        onDrop: (e) => {
-          e.preventDefault();
-          e.currentTarget.classList.remove('dragging');
-          const f = e.dataTransfer.files[0];
-          if (f && f.type === 'application/pdf') { state.uploadFile = f; render(); }
-        }
+      h('div',{
+        className:`drop-zone ${files.length?'has-file':''}`,
+        onClick:()=>document.getElementById('file-input').click(),
+        onDragover:e=>{e.preventDefault();e.currentTarget.classList.add('dragging');},
+        onDragleave:e=>{e.currentTarget.classList.remove('dragging');},
+        onDrop:e=>{e.preventDefault();e.currentTarget.classList.remove('dragging');addFiles(e.dataTransfer.files);}
       },
-        state.uploadFile
-          ? [h('div', { style: { fontSize: '32px', marginBottom: '12px' } }, '📄'),
-             h('div', { style: { color: 'var(--text-white)', fontWeight: 500 } }, state.uploadFile.name),
-             h('div', { style: { color: 'var(--text-muted)', fontSize: '13px', marginTop: '4px' } }, (state.uploadFile.size / 1024 / 1024).toFixed(2) + ' MB')]
-          : [h('div', { className: 'drop-icon' }, '↑'),
-             h('div', { style: { color: 'var(--text-secondary)' } }, 'Drop PDF here or click to browse'),
-             h('div', { style: { color: 'var(--text-muted)', fontSize: '13px', marginTop: '8px' } }, 'Maximum 50MB')]
+        files.length
+          ? [h('div',{style:{fontSize:'28px',marginBottom:'8px'}},'📄'),
+             h('div',{style:{color:'var(--text-white)',fontWeight:500,fontSize:'15px'}}, `${files.length} file${files.length>1?'s':''} selected`),
+             h('div',{style:{color:'var(--text-muted)',fontSize:'12px',marginTop:'4px'}}, fmtSize(totalSize)+' total — click or drop to add more')]
+          : [h('div',{className:'drop-icon'},'↑'),
+             h('div',{style:{color:'var(--text-secondary)'}},'Drop PDFs here or click to browse'),
+             h('div',{style:{color:'var(--text-muted)',fontSize:'13px',marginTop:'8px'}},'Select one or multiple PDF files')]
       ),
-      h('input', { type: 'file', id: 'file-input', accept: '.pdf', style: { display: 'none' },
-        onChange: (e) => { if (e.target.files[0]) { state.uploadFile = e.target.files[0]; render(); } }
-      }),
-      h('div', { className: 'modal-buttons' },
-        h('button', { className: 'btn-cancel', onClick: () => { state.showUpload = false; state.uploadFile = null; render(); } }, 'Cancel'),
-        h('button', {
-          className: 'btn-submit',
-          disabled: !state.uploadFile || state.uploading,
-          onClick: uploadFile
-        }, state.uploading ? 'Uploading...' : 'Process Statement')
+      h('input',{type:'file',id:'file-input',accept:'.pdf',multiple:true,style:{display:'none'},
+        onChange:e=>{if(e.target.files.length){addFiles(e.target.files);e.target.value='';}}}),
+      files.length ? h('div',{className:'file-list'},
+        ...files.map((f,i) =>
+          h('div',{className:'file-item'},
+            h('div',{style:{display:'flex',alignItems:'center',overflow:'hidden'}},
+              h('span',{className:'file-item-name'},f.name),
+              h('span',{className:'file-item-size'},fmtSize(f.size))),
+            h('button',{className:'file-item-remove',onClick:()=>{state.uploadFiles.splice(i,1);render();},title:'Remove'},'✕')))
+      ) : null,
+      h('div',{className:'modal-buttons'},
+        h('button',{className:'btn-cancel',onClick:()=>{state.showUpload=false;state.uploadFiles=[];render();}},'Cancel'),
+        h('button',{className:'btn-submit',disabled:!files.length||state.uploading,onClick:uploadFiles},
+          state.uploading ? state.uploadProgress||'Uploading...' : `Process ${files.length||''} Statement${files.length!==1?'s':''}`)
       )
     )
   );
-  return overlay;
 }
 
 // ═══════════════════════════════════════════════════════════
@@ -651,14 +646,9 @@ function render() {
   const app = document.getElementById('app');
   app.innerHTML = '';
   app.appendChild(renderHeader());
-
-  const main = h('main', { className: 'main' }, h('div', { className: 'container' },
-    state.view === 'overview' ? renderOverview() :
-    state.view === 'documents' ? renderDocuments() :
-    renderReview()
-  ));
-  app.appendChild(main);
-
+  app.appendChild(h('main',{className:'main'}, h('div',{className:'container'},
+    state.view==='overview' ? renderOverview() : state.view==='documents' ? renderDocuments() : renderReview()
+  )));
   const modal = renderUploadModal();
   if (modal) app.appendChild(modal);
 }
